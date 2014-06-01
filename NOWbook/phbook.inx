@@ -1,0 +1,14 @@
+>
+~
+HPJava |{001}
+HPspmd |{001}
+group |{003}
+group, process groups |{003}
+range |{003}
+range, distributed ranges |{003}
+group, subgroups |{003}
+range, subranges |{003}
+data descriptor |{004}
+global scalar reference |{005}
+global array reference |{006}
+SPMD constraint |{008}

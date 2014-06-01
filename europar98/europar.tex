@@ -1,0 +1,743 @@
+\documentstyle[psfig]{llncs}
+
+\begin{document}
+
+\bibliographystyle{plain}
+
+%\pagestyle{plain}
+
+\title{Towards a Java Environment for SPMD Programming}
+
+\author{Bryan Carpenter, Guansong Zhang, Geoffrey Fox \\
+        Xiaoming Li\thanks{Current address: Peking University},
+        Xinying Li and Yuhong Wen}
+
+\institute{NPAC at Syracuse University \\
+           Syracuse, New York, \\
+           NY 13244, USA \\
+           \{dbc,zgs,gcf,lxm,xli,wen\}@npac.syr.edu}
+
+\maketitle
+
+\begin{abstract}
+As a relatively straightforward object-oriented language, Java is
+a plausible basis for a scientific parallel programming
+language.  We outline a conservative set of language extensions to
+support this kind of programming.  The programming style advocated is
+Single Program Multiple Data (SPMD), with parallel arrays added as
+language primitives.  Communications involving distributed arrays are
+handled through a standard library of collective operations.  Because
+the underlying programming model is SPMD programming, direct calls to
+other communication packages are also possible from this language.
+\end{abstract}
+
+%newpage
+
+\section{Introduction}
+
+Java boasts a direct simplicity reminiscent of Fortran, but also
+incorporates many of the important ideas of modern object-oriented
+programming.  Of course it comes with an established track-record in
+the domains of Web and Internet programming.  The idea that Java may
+enable new programming environments, combining attractive user
+interfaces with high performance computation, is gaining increasing
+attention amongst computational scientists
+\cite{Java_for_CSE,Java_for_CSE_II}.
+
+This article will focus specifically on the potential of Java as a
+language for scientific parallel programming.  We envisage a framework
+called {\em HPJava}.  This would be a general environment for parallel
+computation.  Ultimately it should combine tools, class libraries, and
+language extensions to support various established paradigms for
+parallel computation, including shared memory programming, explicit
+message-passing, and array-parallel programming.  This is a rather
+ambitious vision, and the current article only discusses some first
+steps towards a general framework.  In particular we will make specific
+proposals for the sector of HPJava most directly related to its
+namesake: High Performance Fortran.
+
+For now we do not propose to import the full HPF programming model to
+Java.  After several years of effort by various compiler groups, HPF
+compilers are still quite immature.  It seems difficult justify a
+comparable effort for Java before success has been convincingly
+demonstrated in Fortran.  In any case there are features of the HPF
+model that make it less attractive in the context of the integrated
+parallel programming environment we envisage.  Although an HPF program
+{\em can} interoperate with modules written in other parallel
+programming styles through the HPF extrinsic procedure interface, that
+mechanism is quite awkward.  Rather than follow the HPF model directly,
+we propose introducing some of the characteristic ideas of
+HPF---specifically its distributed array model and array intrinsic
+functions and libraries---into a basically SPMD programming model.
+Because the programming model is SPMD, direct calls to MPI
+\cite{Experiments_HPJava} or other communication packages are allowed
+from the HPJava program.
+
+The language outlined here provides HPF-like distributed
+arrays as language primitives, and new {\em distributed control}
+constructs to facilitate access to the local elements of these arrays.
+In the SPMD mold, the model allows processors the freedom to
+independently execute complex procedures on local elements: it is not
+limited by SIMD-style array syntax.
+All access to {\em non-local} array elements must go through
+library functions---typically collective communication operations.
+This puts an extra onus on the programmer; but making communication
+explicit encourages the programmer to write algorithms that exploit
+locality, and simplifies the task of the compiler writer.
+On the other hand, by providing distributed arrays as language
+primitives we are able to simplify error-prone tasks
+such as converting between local and global array subscripts and
+determining which processor holds a particular element.
+As in HPF, it is possible to write programs at a natural level of
+abstraction where the meaning is insensitive to the detailed mapping of
+elements.  Lower-level styles of programming are also possible.
+
+\section{Multidimensional Arrays\label{multiDim}}
+
+First we describe a modest extension to Java that adds a class of true
+multi-dimensional arrays to the standard Java language.  The new arrays
+allow regular section subscripting, similar to Fortran 90 arrays.  The
+syntax described in this section is a subset of the syntax introduced
+later for parallel arrays and algorithms: the only motivation for
+discussing the sequential subset first is to simplify the overall
+presentation.
+
+No attempt is made to integrate the new multidimensional arrays
+with the standard Java arrays: they are a new kind of entity that
+coexists in the language with ordinary Java arrays.  There
+are good technical reasons for keeping the two kinds of array
+separate\footnote{For example, the run-time representation of our
+multi-dimensional arrays includes extra descriptor information that would
+encumber the large class ``non-scientific'' Java applications.}.
+The type-signatures and constructors of the multidimensional array use
+double brackets to distinguish them from ordinary arrays:
+\small
+\begin{verbatim}
+  int [[,]] a = new int [[5, 5]] ;
+
+  float [[,,]] b = new float [[10, n, 20]] ;
+
+  int [[]] c = new int [[100]] ;
+\end{verbatim}
+\normalsize
+{\tt a}, {\tt b} and {\tt c} are respectively 2-, 3- and one- dimensional
+arrays.  Of course {\tt c} is very similar in structure to the standard
+array {\tt d}, created by
+\small
+\begin{verbatim}
+  int [] d = new int [100] ;
+\end{verbatim}
+\normalsize
+{\tt c} and {\tt d} are not identical, though.  For example,
+{\tt c} allows section subscripting (see below), whereas {\tt d} does
+not.  The value {\tt c} would not be assignable to {\tt d}, or vice
+versa..
+
+Access to individual elements of a multidimensional array goes through
+a subscripting operation involving single brackets, for example
+\small
+\begin{verbatim}
+  for(int i = 0 ; i < 4 ; i++)
+    a [i, i + 1] = i + c [i] ;
+\end{verbatim}
+\normalsize
+For reasons that will become clearer in later sections, this style of
+subscripting is called {\em local subscripting}.  In the current
+sequential context, apart from the fact that a single pair of brackest
+may include several comma-separated subscripts, this kind of
+subscripting works just like ordinary Java array subscripting.
+Subscripts always start at zero, in the ordinary Java or C style (there
+is no Fortran-like lower bound).
+
+Our HPJava imports a Fortran-90-like idea of array {\em regular
+sections}.  The syntax for {\em section subscripting} is different to
+the syntax for local subscripting.  Double brackets are used.  These
+brackets can include scalar subscripts or {\em subscript triplets}.
+A section is an object in its own right---its type is that of a suitable
+multi-dimensional array.  It describes some subset of the elements of
+the parent array.
+\small
+\begin{verbatim}
+  int [[]] e = a [[2,  2 :]] ;
+
+  foo(b [[ : , 0, 1 : 10 : 2]]) ;
+\end{verbatim}
+\normalsize
+{\tt e} becomes an alias for the 3rd row of elements of {\tt a}.
+The procedure {\tt foo} should expect a two-dimensional array as argument.
+It can read or write to the set of elements of {\tt b} selected
+by the section.
+As in Fortran, upper or lower bounds can be omitted in triplets,
+defaulting to the actual bound of the parent array, and the
+stride entry of the triplet is optional.
+
+In general our language has no idea of Fortran-like array assignments.  In
+\small
+\begin{verbatim}
+  int [[,]] e = new int [[n, m]] ;
+  ...
+  a = e ;
+\end{verbatim}
+\normalsize
+the assignment simply copies a handle to object referenced by {\tt e}
+into {\tt a}.  There is no element-by-element copy involved. 
+On the other hand
+the language provides a standard library of functions for manipulating its
+arrays, closely analogous to the array transformational intrinsic
+functions of Fortran 90:
+\small
+\begin{verbatim}
+  int [[,]] f = new int [[5, 5]] ;
+  HPJlib.shift(f, a, -1, 0, CYCL) ;
+
+  float g = HPJlib.sum(b) ;
+
+  int [[]] h = new int [[100]] ;
+  HPJlib.copy(h, c) ;
+\end{verbatim}
+\normalsize
+The {\tt shift} operation with shift-mode {\tt CYCL} executes a cyclic
+shift on the data in its second argument, copying the result to its
+first argument---an array of the same shape.  In the example
+the shift amount is -1, and the shift is performed in dimension 0 of
+the array---the first of its two dimensions.  The {\tt sum} operation
+simply adds all elements of its argument array.  The {\tt copy} operation
+copies the elements of its second argument to its first---it is something
+like an array assignment.  These functions can be overloaded
+to apply to some finite set of array types.  In the initial implementation
+of the language, the new arrays will be restricted to taking
+elements of primitive type.  This is not regarded as an essential limit
+to the language, but it simplifies various aspects of the implementation,
+such as the communication library.
+
+\section{Distributed Arrays\label{distArrays}}
+
+HPJava adds class libraries and some additional syntax for dealing
+with {\em distributed arrays}.  These arrays are viewed as
+coherent global entities, but their elements are divided
+across a set of cooperating processes.  As a preliminary to
+introducing distributed arrays we discuss the {\em process arrays} over
+which their elements are scattered.
+
+A base class {\tt Group} describes a general group of processes.
+It has subclasses {\tt Procs1}, {\tt Procs2}, \ldots, representing
+one-dimensional process arrays, two-dimen\-sional process arrays, 
+and so on.
+\small
+\begin{verbatim}
+  Procs2 p = new Procs2(2, 2) ;
+  Procs1 q = new Procs1(4) ;
+\end{verbatim}
+\normalsize
+These declarations set {\tt p} to represent a 2 by 2 process array and {\tt q}
+to represent a 4-element, one-dimensional process array.  In either case
+the object created describes a group of 4 processes.
+At the time the {\tt Procs} constructors are executed the program should be
+executing on four or more processes.  Either constructor selects four
+processes from this set and identifies them as members of
+the constructed group.
+
+The multi-dimensional structure of a process array is reflected in
+its set of {\em process dimensions}.  An object is associated
+with each dimension.  These objects are accessed through the
+inquiry member {\tt dim}:
+\small
+\begin{verbatim}
+  Dimension x = p.dim(0) ;
+  Dimension y = p.dim(1) ;
+
+  Dimension z = q.dim(0) ;
+\end{verbatim}
+\normalsize
+As indicated, the object returned by the {\tt dim} inquiry has class
+{\tt Dimension}.
+
+Now, some or all of the dimensions of a multi-dimensional array can be
+declared as {\em distributed ranges}.  In general a distributed
+range is represented by an object of class {\tt Range}.  A {\tt Range}
+object defines a range of integer subscripts, and defines how they are mapped
+into a process array dimension.
+For example, the class {\tt BlockRange} is a subclass of {\tt Range}
+which describes a simple block-distributed range of subscripts.  Like
+{\tt BLOCK} distribution format in HPF, it maps blocks of contiguous
+subscripts to each element of its target process
+dimension\footnote{Other range subclasses include {\tt CyclicRange},
+which produces the equivalent of {\tt CYCLIC} distribution format in
+HPF.}.  The constructor of {\tt BlockRange} usually takes two
+arguments: the extent of the range and a {\tt Dimension} object
+defining the process dimension over which the new range is
+distributed.
+
+The syntax of Sect.\,\ref{multiDim} is extended in the following way
+to support distributed arrays
+\begin{itemize}
+\item
+A distributed range object may appear in place of an integer extent in the
+``constructor'' of the array (the expression following the {\tt new}
+keyword).
+\item
+If a particular dimension of the array has a distributed range, the
+corresponding slot in the type signature of the array should include
+a {\tt \#} symbol.  (From the point of view of the type hierarchy,
+the sequential multi-dimensional arrays of the last section
+are regarded as a specialization of the more general distributed
+distributed array class embellished with {\tt \#} symbols).
+\item
+In general the constructor of the distributed
+array must be followed by an {\tt on} clause, specifying the process
+group over which the array is distributed.  Distributed ranges
+of the array must be distributed over distinct dimensions of this
+group.  The {\tt on} clause can be omitted in some circumstances---see
+Sect.\,\ref{on}.
+\end{itemize}
+
+For example, in
+\small
+\begin{verbatim}
+  Procs2 p = new Procs2(3, 2) ;
+  
+  Range x = new BlockRange(100, p.dim(0)) ;
+  Range y = new BlockRange(200, p.dim(1)) ;
+
+  float [[#,#]] a = new float [[x, y]] on p ;
+\end{verbatim}
+\normalsize
+{\tt a} is created as a 100 $\times$ 200 array, block-distributed
+over the 6 processes in {\tt p}.  The fragment is
+essentially equivalent to the HPF declarations
+\small
+\begin{verbatim}
+  !HPF$ PROCESSORS p(3, 2)
+  
+        REAL a(100, 200)
+
+  !HPF$ DISTRIBUTE a(BLOCK, BLOCK) ONTO p
+\end{verbatim}
+\normalsize
+
+Because {\tt a} is declared as a collective object we can apply
+collective operations to it.  The {\tt HPJlib} functions introduced in
+Sect.\,\ref{multiDim} apply equally well to distributed arrays, but
+now they imply inter-processor communication.
+\small
+\begin{verbatim}
+  float [[#,#]] b = new float [[x, y]] on p ;
+
+  HPJlib.shift(a, b, -1, 0, CYCL) ;
+\end{verbatim}
+\normalsize
+At the edges of the local segment of {\tt a} the {\tt shift} operation
+causes the local values of {\tt a} to be overwritten with values of
+{\tt b} from a processor adjacent in the {\tt x} dimension.
+
+Subscripting operations on distributed arrays are subject to a strict
+restriction.  As already emphasized, the HPJava model is explicitly SPMD.
+An array access such as
+\small
+\begin{verbatim}
+  a [17, 23] = 13 ;
+\end{verbatim}
+\normalsize
+is legal, but {\em only} if the local process holds the element in
+question.  The language provides several {\em distributed control}
+constructs to alleviate the inconvenience of this restriction.
+
+
+\section{The {\em on} Construct and the Active Process Group\label{on}}
+
+The class {\tt Group} (of which the process array classes are special
+cases) has a member function called {\tt local}.  This returns a boolean
+value which is {\tt true} if the local process is a member of the
+group, {\tt false} otherwise.  In
+\small
+\begin{verbatim}
+  if(p.local()) {
+    ...
+  }
+\end{verbatim}
+\normalsize
+the code inside the conditional is executed only if the
+local process is a member {\tt p}.  We can say that inside this
+construct the {\em active process group} is restricted to {\tt p}.
+
+Our language provides a short way of writing this construct
+\small
+\begin{verbatim}
+  on(p) {
+    ...
+  }
+\end{verbatim}
+\normalsize
+The {\em on} construct provides some extra value.  The language
+incorporates a formal idea of the active process group (APG).  At any
+point of execution some process group is singled out as the APG.  An
+{\tt on(p)} construct specifically changes the value of the APG to {\tt
+p}.  On exit from the construct, the APG is restored to its value on
+entry.
+
+Elevating the active process group to a part of the language
+allows some simplifications.  For example, it provides a natural
+default for the {\tt on} clause in array constructors.
+More importantly, formally defining the active process group
+simplifies the statement of various rules about what operations are legal
+{\em inside} distributed control constructs like {\em on}.
+
+\section{Locations and the {\em at} Construct\label{locations}}
+
+Returning to the example at the end of Sect.\,\ref{distArrays},
+we need a mechanism to ensure that the array access
+\small
+\begin{verbatim}
+  a [17, 23] = 13 ;
+\end{verbatim}
+\normalsize
+is legal, because the local process holds the element in question.  In
+general determining whether an element is local may be a non-trivial
+task.
+
+In practise it is unusual to use integer values directly as local
+subscripts in distributed array dimensions.
+Instead the idea of a {\em location} is introduced.  A
+location can be viewed as an abstract element, or ``slot'', of a
+distributed range.
+Conversely, a range can be thought of as a set of locations.
+%This model of a range is visualized in
+%Fig.\,\ref{rangeSlots}.
+An individual location is described by an object of the class {\tt Location}.
+Each {\tt Location} element is mapped
+to a particular slice of a process grid.
+In general two locations are identical only
+if they come from the same position in the same range.
+A subscripting syntax is used to represent
+location {\tt n} in range {\tt x}:
+\small
+\begin{verbatim}
+  Location i = x [n]
+\end{verbatim}
+\normalsize
+
+%\begin{figure}[btp]
+%\centerline{\psfig{figure=rangeSlots.eps,height=0.6in}}
+%\caption{\label{rangeSlots}A range regarded as a set of locations,
+%or slots.}
+%\end{figure}
+
+This is an important idea in HPJava.  By working in terms of
+abstract loca\-tions---elements of distributed ranges---one can usually
+respect locality of reference without resorting explicitly to low-level
+local subscripts and process ids.  In fact the location can be viewed
+as an abstract data type incorporating these lower-level offsets.
+The data fields of {\tt Location} include {\tt dim}
+and {\tt crd}.  The first is the process dimension of the parent
+range.  The second is the coordinate in that dimension to which the element
+is mapped.
+
+Locations are used to parametrize a new distributed control
+construct called the {\em at} construct.  This
+is analogous to {\em on}, except that its
+body is executed only on processes that hold the specified location.
+Locations can also be used directly as array subscripts, in place on
+integers.  So the access to element {\tt a [17, 23]}
+could now be safely written as follows:
+\small
+\begin{verbatim}
+  Location i = x [17], j = y [23] ;
+
+  at(i)
+    at(j)
+      a [i, j] = 13 ;
+\end{verbatim}
+\normalsize
+Locations used as array subscripts must be elements of the
+corresponding ranges of the array.
+
+There is a restriction that an {\tt at(i)} construct should
+only appear at a point of execution where {\tt i.dim} is a dimension of
+the active process group.  In the examples of this section this means
+that an {\tt at(i)} construct, say, should normally be nested directly
+or indirectly inside an {\tt on(p)} construct.
+
+The range class has a member function {\tt idx}
+%\small
+%\begin{verbatim}
+%  int Range.idx(Location i)
+%\end{verbatim}
+%\normalsize
+which can be used to recover the integer subscript, given a
+location in the range.
+
+\section{Distributed Loops}
+
+The {\em at} mechanism of the previous section is often useful, but in
+practice good parallel algorithms do not spend much time assigning to
+isolated elements of distributed arrays.  A more urgent requirement
+is a mechanism for {\em parallel} access to distributed array
+elements.
+
+The last and most important distributed control construct in the language
+is called {\em over}.
+It implements a distributed parallel loop.  Conceptually it is quite
+similar to the {\tt FORALL} construct of Fortran, except that the
+{\em over} construct specifies exactly where its parallel iterations
+are to be performed.
+The argument of {\em over} is a member of the special class {\tt Index}.
+This class is a subclass of {\tt Location}, so it is syntactically
+correct to use an index as an array subscript (the effect
+of such subscripting is only well-defined inside an {\em over} construct
+parametrised by the index in question).  Here is an example of
+a pair of nested {\em over} loops:
+\small
+\begin{verbatim}
+  float [[#,#]] a = new float [[x, y]],
+                b = new float [[x, y]] ;
+  ...
+  Index i, j ;
+  over(i = x | :)
+    over(j = y | :)
+      a [i, j] = 2 * b [i, j] ;
+\end{verbatim}
+\normalsize
+The body of an {\em over} construct executes, conceptually in parallel,
+for every location in the range of its index (or some subrange if a
+non-trivial triplet is specified).  An individual
+``iteration'' executes on just those processors holding the location
+associated with the iteration.
+The net effect of the example above should be reasonably
+clear.  It assigns twice the value of each element of {\tt b} to the
+corresponding element of {\tt a}.  Because of the rules about {\em
+where} an individual iteration iterates, the body of an {\em over} can
+usually only combine elements of arrays that have some simple
+alignment relation relative to one another.  The {\tt idx} member of
+range can be used in parallel updates to yield expressions that depend
+on global index values.
+
+With the {\em over} construct we can give some useful
+examples of parallel programs.
+
+Figure \ref{Cholesky} gives a parallel implementation
+of Cholesky decomposition in the extended language.
+The first dimension of {\tt a} is sequential (``collapsed''
+in HPF parlance).  The second dimension is distributed (cyclically,
+to improve load-balancing).  This a column-oriented decomposition.
+The example involves one new operation from
+the standard library.  The function {\tt remap} copies the elements
+of one distributed array or section to another of the same shape.
+The two arrays can have any, unrelated decompositions.
+In the current example {\tt remap} is used to implement a broadcast.
+Because {\tt b} has no range distributed over {\tt p},
+it implicitly has {\em replicated} mapping; {\tt remap} accordingly
+copies identical values to all processors.  This example also
+illustrates construction of sections of distributed arrays, and use of
+non-trivial triplets in the {\em over} construct.
+
+\begin{figure}[btp]
+\small
+\begin{verbatim}
+  Procs1 p = new Procs1(P) ;
+  on(p) {
+    Range x = new CyclicRange(N, p.dim(0));
+
+    float [[,#]] a = new float [[N, x]] ;
+
+    float [[]]   b = new float [[N]] ;  // buffer
+
+    // ... some code to initialise `a'
+
+    Location l ;
+    Index m ;
+
+    for(int k = 0 ; k < N - 1 ; k++) {
+
+      at(l = x [k]) {
+        float d =  Math.sqrt(a [k, l]) ;
+
+        a [k, l] = d ;
+        for(int s = k + 1 ; s < N ; s++)
+          a [s, l] /= d ;
+      }
+
+      HPJlib.remap(b [[k + 1 : ]], a [[k + 1 : , k]]);
+
+      over(m = x | k + 1 : )
+        for(int i = x.idx(m) ; i < N ; i++)
+          a [i, m] -= b [i] * b [x.idx(m)] ;
+    }
+
+    at(l = x [N - 1])
+      a [N - 1, l] = Math.sqrt(a [N - 1, l]) ;
+  }
+\end{verbatim}
+\normalsize
+\caption{\label{Cholesky}Choleksy decomposition.}
+\end{figure}
+
+Figure \ref{RedBlack} gives a parallel implementation of red-black
+relaxation in the extended language.  To support this important
+stencil-update paradigm, {\em ghost regions} are allowed on
+distributed arrays.  Ghost regions are extensions of the locally held
+block of a distributed array, used to cache values of elements held on
+adjacent processors.  In our case the width of these regions is
+specified in a special form of the {\tt BlockRange} constructor.  The
+ghost regions are explicitly brought up to date using the library
+function {\tt writeHalo}.  Its arguments are an array with suitable
+extensions and a vector defining in each dimension the width of the
+halo that must actually be updated.
+
+Note that the new range constructor and {\tt writeHalo} function are {\em
+library} features, not new language extensions.  One new piece of
+syntax is needed:  the addition and subtraction operators are
+overloaded so that integer offsets can be added or subtracted to
+locations, yielding new, shifted, locations.  This kind of shifted
+access is illegal if it implies access to off-processor data.  It only
+works if the subscripted array has suitable ghost extensions.
+
+\begin{figure}[btp]
+\small
+\begin{verbatim}
+  Procs2 p = new Procs2(P, P) ;
+
+  on(p) {
+    Range x = new BlockRange(N, p.dim(0), 1) ;  // ghost width 1
+    Range y = new BlockRange(N, p.dim(1), 1) ;  // ghost width 1
+
+    float [[#,#]] u = new float [[x, y]] ;
+
+    int [] widths = {1, 1} ;        // Widths updated by `writeHalo'
+
+    // ... some code to initialise `u'
+
+    for(int iter = 0 ; iter < NITER ; iter++) {
+      for(int parity = 0 ; parity < 2 ; parity++) {
+
+        HPJlib.writeHalo(u, widths) ;
+
+        Index i, j ;
+        over(i = x | 1 : N - 2)
+          over(j = y | 1 + (x.idx(i) + parity) % 2 : N - 2 : 2)
+            u [i, j] = 0.25 * (u [i - 1, j] + u [i + 1, j] +
+                               u [i, j - 1] + u [i, j + 1]) ;
+      }
+    }
+  }
+\end{verbatim}
+\normalsize
+\caption{\label{RedBlack}Red-black iteration using {\tt writeHalo}.}
+\end{figure}
+
+%\section{Other Features}
+%
+We have covered most of the important {\em language} features
+we propose to implement.  Two additional features that are quite important in
+practice but have not been discussed are {\em subranges} and {\em
+subgroups}.  A subrange is simply a range which is a regular section of
+some other range, created by syntax like \verb$x [0 : 49]$.
+%Subranges
+%are created tacitly when a distributed array is subscripted with a
+%triplet, and 
+Subranges can be used to create distributed
+arrays with general HPF-like alignments.  
+A {\em subgroup} is some
+slice of a process array, formed by restricting process coordinates in
+one or more dimensions to single values.
+%Again they may be created
+%implicitly by section subscripting, this time using a scalar subscript.
+Subgroups formally describe the state of the active process group
+inside {\em at} and {\em over} constructs.
+For a more complete description of a slightly earlier version of
+the proposed language, see \cite{JavaAd}.
+
+%The framework described is more powerful than space allows
+%us to demonstrate in this paper.  This power comes in part from the
+%flexibility to add features by extending the libraries associated
+%with the language.  We have only illustrated the simplest kinds of
+%distribution format.  In general any HPF 1.0 array distribution format, plus
+%various others, can be incorporated by extending the {\tt Range}
+%hierarchy in the run-time library.  We have only discussed a
+%a small handful of operations from the communication library---it
+%includes many more operations for remapping arrays and performing
+%irregular data accesses, etc.  Our hope is to provide minimal
+%language support for distributed arrays---just enough to facilitate
+%further extension through construction of new libraries.
+
+\section{Discussion}
+
+We have described a conservative set of extensions to Java.  In the
+context of an explicitly SPMD programming environment with a good
+communication library, we claim these extensions provide much of the
+concise expressiveness of HPF, without relying on very sophisticated
+compiler analysis.  The object-oriented features of Java are exploited
+to give an elegant parameterization of the distributed arrays in the
+extended language.  Because of the relatively low-level programming
+model, interfacing to other parallel-programming paradigms is more
+natural than in HPF.  With suitable care, it is possible to make direct
+calls to, say, MPI from within the data parallel program (in
+\cite{JavaMPI} we suggest a concrete Java binding for MPI).
+
+The language extensions described were devised partly to
+provide a convenient interface to a distributed-array library
+developed in the PCRC project \cite{Common_runtime,NPAC_PCRC_kernel}.
+Hence most of the run-time technology needed to implement the language
+is available ``off-the-shelf''.  The existing library includes the run-time
+descriptor for distributed arrays and a comprehensive array
+communication library.  The HPJava compiler itself is being implemented
+initially as a translator to ordinary Java, through a compiler
+construction framework also developed in the PCRC project
+\cite{PCRC_based}.
+
+The distributed arrays of the extended language will appear in the
+emitted code as a pair---an ordinary Java array of local elements and a
+Distributed Array Descriptor object (DAD).  Details of the distribution
+format, including non-trivial details of global-to-local translation of
+the subscripts, are managed in the run-time library.  Acceptable
+performance should nevertheless be achievable, because we expect that in
+useful parallel algorithms most work on distributed arrays
+will occur inside {\em over} constructs.  In normal usage,
+the formulae for address translation can then be linearized.  The non-trivial
+aspects of address translation (including array bounds checking) can be
+absorbed into the startup overheads of the loop.  Since distributed
+arrays are usually large, the loop ranges are typically large, and
+the startup overheads (including all the run-time calls associated with
+address translation) can be amortized.  This approach to translation of
+parallel loops is discussed in detail in \cite{NPAC_PCRC_kernel}.
+
+Note that if array accesses are genuinely irregular, the necessary
+subscripting
+cannot usually be {\em directly} expressed in our language, because
+subscripts cannot be computed randomly in parallel loops without
+violating the fundamental SPMD restriction that all accesses be local.
+This is not regarded as a shortcoming: on the contrary it forces explicit
+use of an appropriate library package for handling irregular accesses
+(such as CHAOS \cite{CHAOS}).  Of course a suitable binding of such a
+package is needed in our language.
+
+A complementary approach to communication in a distributed array
+environment is the one-sided-communication model of Global Arrays (GA)
+\cite{Global_Arrays}.  For task-parallel problems this
+approach is often more convenient than the schedule-oriented
+communication of CHAOS (say).  Again, the language model we advocate
+here appears quite compatible with GA approach---there is no obvious
+reason why a binding to a version of GA could not be straightforwardly
+integrated with the the distributed array extensions of the language
+described here.
+
+Finally we mention two language projects that have some similarities.
+Spar \cite{Spar} is a Java-based language for array-parallel programming.
+%Like our language it introduces multi-dimensional arrays, array
+%sections, and a parallel loop.
+There are some similarities in syntax, but
+semantically Spar is very different to our language.  Spar expresses
+parallelism but not explicit data placement or communication---it is a
+higher level language.
+ZPL \cite{ZPL} is a new programming language for scientific
+computations.  Like Spar, it is an array language.  It has an idea of
+performing computations over a {\em region}, or set of indices.  Within
+a compound statement prefixed by a {\em region specifier}, aligned
+elements of arrays distributed over the same region can be accessed.
+This idea has certain similarities to our {\em over} construct.
+%Communication is more explicit than Spar, but not as explicit as
+%in the language discussed in this article.
+
+\bibliography{europar}
+
+\end{document}
+

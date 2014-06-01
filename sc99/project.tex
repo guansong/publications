@@ -1,0 +1,454 @@
+
+\documentstyle{article}
+
+\begin{document}
+
+\sloppy
+
+\pagestyle{plain}
+
+\title{An {\em HPspmd} Programming Model{\vspace{0.2in}}\\
+       Extended Abstract}
+
+\author{Bryan Carpenter, Geoffrey Fox and Guansong Zhang\vspace{0.2in} \\ 
+        \em Northeast Parallel Architectures Centre, \\
+        \em Syracuse University, \\
+        \em 111 College Place, \\
+        \em Syracuse, New York 13244-410 \\
+        \em \{dbc,gcf,zgs\}@npac.syr.edu}
+
+\maketitle
+
+\begin{abstract}
+Building on research carried out in the Parallel Compiler Runtime
+Consortium (PCRC) project, this article discusses a language model that
+combines characteristic data-parallel features from the HPF standard
+with an explicitly SPMD programming style.  This model, which we call
+the {\em HPspmd} model, is designed to facilitate direct calls to
+established libraries for parallel programming with distributed data.
+We describe a Java-based HPspmd language called HPJava.
+\end{abstract}
+
+\section{Introduction}
+
+Data parallel programming languages have always held a special position
+in the high-performance computing world.  The basic implementation
+issues related to this paradigm are well understood.  However, the
+choice of high-level programming environment, particularly for modern
+MIMD architectures, remains uncertain.  Six years ago the High
+Performance Fortran Forum published the first standardized definition
+of a language for data parallel programming
+\cite{HPFStandard,HPFBook}.  In the intervening period considerable
+progress has been made in HPF compiler technology, and the HPF language
+definition has been extended and revised in response to demands of
+compiler-writers and end-users \cite{HPF2Standard}.  Yet it seems to be
+the case that most programmers developing parallel applications---or
+environments for parallel application development---do {\em not} code
+in HPF.  The slow uptake of HPF can be attributed in part to immaturity
+in the current generation of compilers.  But it seems likely that many
+programmers are actually more comfortable with the Single Program
+Multiple Data (SPMD) programming style, perhaps because the effect of
+executing an SPMD program is more controllable, and the process of
+tuning for efficiency is more intuitive.
+
+Of course SPMD programming has been very successful.  There are
+countless applications written in the most basic SPMD style, using
+direct message-passing through MPI \cite{MPIStandard} or similar
+low-level packages.  Many higher-level parallel programming
+environments and libraries assume the SPMD style as their basic model.
+Examples include ScaLAPACK \cite{ScaLAPACK}, PetSc \cite{PETSc1}, DAGH
+\cite{HDDA_DAGH}, Kelp \cite{Block_structured}, the Global Array
+Toolkit \cite{Global_Arrays} and NWChem \cite{NWChem1}.  While
+there remains a prejudice that HPF is best suited for problems with
+very regular data structures and regular data access patterns, SPMD
+frameworks like DAGH and Kelp have been designed to deal directly with
+irregularly distributed data, and other libraries like CHAOS/PARTI
+\cite{CHAOS} and Global Arrays support unstructured access to
+distributed arrays.  
+
+These successes aside, the library-based SPMD
+approach to data-parallel programming certainly lacks the uniformity
+and elegance of HPF.  All the environments referred to above have some
+idea of a distributed array, but they all describe those arrays
+differently.  Compared with HPF, creating distributed arrays and
+accessing their local and remote elements is clumsy and error-prone.
+Because the arrays are managed entirely in libraries, the compiler
+offers little support and no safety net of compile-time checking.
+
+This article discusses a class of programming languages
+that borrow certain ideas, various run-time technologies, and some
+compilation techniques from HPF, but relinquish some of its basic
+tenets.  In particular they forgo the principles that the programmer
+should write in a language with (logically) a single global thread of
+control, and that the compiler should determine automatically which
+processor executes individual computations in a program, then
+automatically insert communications if an individual
+computation involves accesses is to non-local array elements.
+
+If these assumptions are removed from the HPF model, does anything
+useful remain?  We argue ``yes''.  What will be retained is an explicitly
+MIMD (SPMD) programming model complemented by syntax for representing
+distributed arrays, and syntax for expressing that certain computations
+are localized to certain processors, including syntax for a distributed
+form of the parallel loop.  The claim is that these features
+are adequate to make calls to various data-parallel libraries, including
+application-oriented libraries and high-level libraries for
+communication, about as convenient as, say, making a call to an array
+transformational intrinsic function in Fortran 90.  Besides their
+advantages as a framework for library usage, the resulting programming
+languages can conveniently express various practical data-parallel
+algorithms.  The resulting framework may also have better prospects for
+dealing effectively with {\em irregular} problems than is the case for
+HPF.
+
+\section{HPspmd language extensions}
+
+We aim to provide a flexible hybrid of the data parallel and low-level
+SPMD paradigms.  To this end HPF-like distributed arrays appear as
+language primitives.  But a design decision is made that all access to {\em
+non-local} array elements should go through library functions---either
+calls to a collective communication library, or simply {\tt
+get} and {\tt put} functions for access to remote blocks of a
+distributed array.  Clearly this decision puts an extra onus on the
+programmer; but making communication explicit encourages the programmer
+to write algorithms that exploit locality, and simplifies the task of
+the compiler writer.
+
+For the newcomer to HPF, one of its advantages lies in the
+fact that the effect of a particular operation is logically
+identical to its effect in the corresponding sequential program.
+Assuming programmers understand conventional Fortran,
+it is very easy for them to understand the behaviour of a program
+at the level of what values are held in program variables,
+and the final results of procedures and programs.  Unfortunately, the
+ease of understanding this ``value semantics'' of a program is
+counterbalanced by the difficulty in knowing exactly how the compiler
+translated the program.  Understanding the {\em performance} of an HPF
+program may require that the programmer have rather detailed
+knowledge of how arrays are distributed over processor memories,
+and what strategy the compiler adopts for distributing computations.
+
+The language model we discuss has a special relationship to the HPF
+model, but the HPF-style semantic equivalence between the data-parallel
+program and a sequential program is abandoned in favour of a simple
+equivalence between the data-parallel program and an MIMD (SPMD) program.
+Because understanding an SPMD program is presumably more difficult than
+understanding a sequential program, our language may be slightly
+harder to learn and use than HPF.  But understanding performance of
+programs should be much easier.
+
+The distributed arrays of an HPspmd language should be kept strictly
+separate from ordinary arrays.  They are a different kind of object,
+not type-compatible with ordinary arrays.  A property of the languages
+we describe is that if a section of program text {\em looks like}
+program text from the unenhanced base language (Fortran 90 or Java, for
+example), it is translated exactly as for the base language---as local
+sequential code.  Only statements involving the extended syntax are
+treated specially.  This makes preprocessor-based implementation of the
+new languages straightforward, allows sequential library code to be
+called directly, and gives programmers good control over the generated
+code---they can be confident no unexpected overhead have been
+introduced into code that looked like ordinary Fortran, for example.
+
+We adopt a distributed array model
+semantically equivalent to to the HPF data model in terms of how
+elements are stored, the options for distribution and alignment, and
+facilities for describing {\em regular sections} of arrays.
+Distributed arrays may be subscripted with global subscripts, as in
+HPF.  But an array element reference must not imply access to a
+value held on a different processor.  We sometimes refer to this
+restriction as the {\em SPMD constraint}.  To simplify the task of the
+programmer, who must be sure accessed elements are held locally, the
+languages can add {\em distributed control} constructs.
+These play a role something like the {\tt ON HOME} directives of HPF
+2.0 and earlier data parallel languages \cite{Kali}.  One special
+control construct---a distributed parallel loop---facilitates traversal
+of locally held elements from a group of aligned arrays.
+
+A Java instantiation (HPJava) of this HPspmd language model
+has been described in \cite{HPJava}.  A brief review is
+given in section \ref{sec:HPJava}.  
+In \cite{Bindings} we have outlined possible syntax
+extensions to Fortran to provide similar semantics to HPJava. 
+
+\section{Integration of high-level libraries\label{libraries}}
+
+Libraries are at the heart of our HPspmd model.  From one point of
+view, the language extensions are simply a framework for invoking
+libraries that operate on distributed arrays.  
+Hence an essential component of the ongoing work is definition of a series of
+bindings from HPspmd languages to established SPMD libraries and
+environments.  Because the language model is explicitly SPMD, such
+bindings are a more straightforward proposition than in HPF, where
+one typically has to pass some extrinsic interface barrier before
+invoking SPMD-style functions.
+
+We can group the existing SPMD libraries for data parallel programming
+into three categories.
+In the first category we have libraries like ScaLAPACK \cite{ScaLAPACK}
+and PetSc \cite{PETSc1} where the primary focus is similar to
+conventional numerical libraries---providing implementations of
+standard matrix algorithms (say) but operating on elements in regularly
+distributed arrays.  We assume that designing HPspmd interfaces to
+this kind of package will be relatively straightforward.
+ScaLAPACK for example, provides linear algebra routines for
+distributed-memory computers.  These routines operate on distributed
+arrays---specifically, distributed matrices.  The distribution formats
+supported are restricted to two-dimensional block-cyclic distribution
+for dense matrices and one-dimensional block distribution for
+narrow-band matrices.  Since both these distribution formats are
+supported by HPspmd, using ScaLAPACK routines from the HPspmd framework should
+present no fundamental difficulties.
+
+In a second category we place libraries conceived primarily as
+underlying support for general parallel programs with regular
+distributed arrays.  They emphasize high-level communication primitives
+for particular styles of programming, rather than specific numerical
+algorithms.  These libraries include compiler runtime libraries like
+Multiblock Parti \cite{structured} and Adlib \cite{PCRC_based}, and
+application-level libraries like the Global Array toolkit
+\cite{Global_Arrays}.  Adlib is a runtime library that was
+designed to support HPF translation.  It provides communication
+primitives similar to Multiblock PARTI, plus the Fortran 90
+transformational intrinsics for arithmetic on distributed arrays.  The
+Global Array (GA) toolkit, developed at Pacific Northwest National Lab,
+provides an efficient and portable ``shared-memory'' programming
+interface for distributed-memory computers.  Each process in a MIMD
+parallel program can asynchronously access logical blocks of
+distributed arrays, without need for explicit cooperation by other
+processes (``one-sided communication'').  Besides providing a more
+tractable interface for creation of multidimensional distributed
+arrays, our syntax extensions should provide a more convenient
+interface to primitives like {\tt ga\_get}, which copies a patch of
+a global array to a local array.
+
+Regular problems (such as the linear algebra examples in section
+\ref{sec:HPJava}) are an important subset of parallel applications, but
+of course they are far from exclusive.  Many important problems involve
+data structures too irregular to represent purely through HPF-style
+distributed arrays.  Our third category of libraries therefore includes
+libraries designed to support irregular problems.  These include CHAOS
+\cite{CHAOS} and DAGH \cite{HDDA_DAGH}.  We anticipate that
+irregular problems will still benefit from regular data-parallel
+language extensions---at some level they usually resort to
+representations involving regular arrays.  But lower level SPMD
+programming, facilitated by specialized class libraries, is likely to
+take a more important role.  For an HPspmd binding of the CHAOS/PARTI library,
+for example, the simplest assumption is that the preprocessing phases
+yield new arrays.  Indirection arrays may well be left as HPspmd
+distributed arrays; data arrays may be reduced to ordinary Java arrays
+holding local elements.  Parallel loops of an executor phase can then
+be expressed using {\em overall} constructs.  More advanced schemes may
+incorporate irregular maps into generalized array descriptors
+\cite{HPF2Standard,FortranD,ViennaFortran} and require extensions to
+the baseline HPspmd language model.
+
+
+\section{HPJava---an HPspmd language\label{sec:HPJava}}
+
+HPJava \cite{HPJava} is an instance of our HPsmpd language
+model.  HPJava extends its base language, Java, by adding some
+predefined classes and some additional syntax for dealing with
+distributed arrays.
+
+As explained in the previous section, the underlying distributed array
+model is equivalent to the HPF array model.  Array mapping
+is described in terms of a slightly different set of basic
+concepts.  {\em Process group} objects generalize the processor
+arrangements of HPF.  {\em Distributed range} objects are used
+instead HPF templates.  A distributed range is comparable with a single
+dimension of an HPF template.  These substitutions are a change
+of parametrization only.  Groups and ranges fit better with our
+distributed control constructs.
+
+\begin{figure*}[tbp]
+\small
+\begin{verbatim}
+  Procs2 p = new Procs2(P, P) ;
+  on(p) {
+    Range x = new BlockRange(M, p.dim(0)) ;
+    Range y = new BlockRange(N, p.dim(1)) ;
+
+    float [[,]] a = new float [[x, y]], b = new float [[x, y]],
+                c = new float [[x, y]] ;
+
+    ... initialize values in `a', `b'
+
+    overall(i = x for :)
+      overall(j = y for :)
+        c [i, j] = a [i, j] + b [i, j] ;
+  }
+\end{verbatim}
+\normalsize
+\caption{A parallel matrix addition.\label{fig:addition}}
+\end{figure*}
+
+Figure \ref{fig:addition} is a simple example of an HPJava program.  It
+illustrates creation of distributed arrays, and access to their
+elements.  The class {\tt Procs2} is a standard library class derived
+from the special base class {\tt Group}.  It represents a
+two-dimensional grid of processes.  Similarly the distributed range class
+{\tt BlockRange} is a library class derived from the special class {\tt
+Range}; it denotes a range of subscripts distributed with
+BLOCK distribution format over a specific process dimension.  Process
+dimensions associated with a grid are returned by the {\tt dim()}
+inquiry.
+The {\tt on(p)} construct is a new control construct specifying that
+the enclosed actions are performed only by processes in group {\tt p}.
+
+The variables {\tt a}, {\tt b} and {\tt c} are all distributed array
+objects.  The type signature of an $r$-dimensional distributed array
+involves double brackets surrounding $r$ comma-separated slots.  The
+constructors specify that these all have ranges {\tt x} and {\tt y}---they
+are all {\tt M} by {\tt N} arrays, block-distributed over {\tt p}.
+
+A second new control construct, {\em overall}, implements a distributed
+parallel loop.  The
+constructs here iterate over all locations (selected by the degenerate
+interval ``\verb$ : $'') of ranges \verb$x$ and \verb$y$.  The symbols
+{\tt i} and {\tt j} scoped by these constructs are {\em bound
+locations}.  In HPF, a distributed array element is referenced using
+integer subscripts, like an ordinary array.  In HPJava, with a couple
+of exceptions noted below, the subscripts in element references must be
+bound locations, and these must be locations in the range associated
+with the array dimension.  This rather drastic restriction is a
+principal means of ensuring that referenced array elements are held
+locally.
+
+\begin{figure}[btp]
+
+\small
+\begin{verbatim}
+  Procs2 p = new Procs2(P, P) ;
+  on(p) {
+    Range x = new ExtBlockRange(N, p.dim(0), 1, 1) ;
+    Range y = new ExtBlockRange(N, p.dim(1), 1, 1) ;
+
+    float [[,]] u = new float [[x, y]] ;
+
+    ... some code to initialise `u'
+
+    for(int iter = 0 ; iter < NITER ; iter++) {
+
+      Adlib.writeHalo(u) ;
+
+      overall(i = x for 1 : N - 2)
+        overall(j = y for 1 + (i` + iter) % 2 : N - 2 : 2)
+          u [i, j] = 0.25 * (u [i - 1, j] + u [i + 1, j] +
+                             u [i, j - 1] + u [i, j + 1]) ;
+    }
+  }
+\end{verbatim}
+\normalsize
+
+\caption{\label{fig:redBlack}Red-black iteration.}
+\end{figure}
+
+The general policy is relaxed slightly to simplify coding of stencil
+updates.  A subscript can be a {\em shifted location}.  Usually
+this is only legal if the subscripted array is declared with suitable {\em
+ghost regions} \cite{Ghost}.  Figure \ref{fig:redBlack} illustrates the
+use of the library class {\tt ExtBlockRange} to create arrays with
+ghost extensions (in this case, extensions of width 1 on either side of
+the locally held ``physical'' segment).  The communication library
+routine {\tt Adlib.writeHalo} updates the ghost region.  This example
+also illustrates application of a postfix backquote operator to a bound
+location.  The expression {\tt i`} (read ``i-primed'') yields the integer
+global loop index.
+
+Distributed arrays can be defined with some sequential dimensions.  The
+sequential attribute of an array dimension is flagged by an asterisk in
+the type signature.  As illustrated in Figure \ref{fig:pipedMatmul},
+element reference subscripts in sequential dimensions can be ordinary
+integer expressions.
+
+The short examples here have already covered much of the special syntax
+of HPJava.  Other significant extensions allow Fortran-90-like {\em
+sections} of distributed arrays.  This, in turn, forces us to define
+certain {\em subranges} and {\em subgroups}.  Arrays constructed
+directly using subgroups and subranges can reproduce all the alignment
+options of HPF.  In any case, the language itself is relatively
+simple.  Complexities associated with varied and irregular patterns of
+communication are dealt with in libraries.  These can implement many
+richer operations than the {\tt writeHalo} and {\tt cshift} functions
+of the examples.
+
+\section{Conclusions}
+
+In this article we discussed motivations for introducing an HPspmd
+programming model: a SPMD framework for using libraries based on
+distributed arrays.  It adopts the model of distributed arrays
+standardized by the HPF Forum, but relinquishes the high-level
+single-threaded model of the HPF language.  This makes compilers or
+translators for the HPspmd-extended languages a relatively
+straightforward proposition.  As a concrete example, we described the
+specific syntax of HPJava.
+
+Two recent languages that have some similarities to our HPspmd
+languages are F-\,- and ZPL.  F-\,- \cite{FMM} is an extended Fortran
+dialect for SPMD programming.  The approach is different to the one
+proposed here.  There is no analogue of global subscripts, or HPF-like
+distribution formats.  In F-\,- the logical model of communication is
+built into the language---remote memory access with intrinsics for
+synchronization---where our basic philosophy is to provide
+communication through separate libraries.  ZPL \cite{ZPL} is a
+array parallel programming language for scientific computations.
+It has a construct for performing computations over a {\em region}, or
+set of indices, quite similar to our {\em overall} construct.
+Communication is more explicit than HPF, but not as
+explicit as in the language discussed in this article.
+
+% Figure moved here to avoid creating a separate page
+
+\begin{figure}[tbp]
+\small
+\begin{verbatim}
+  Procs1 p = new Procs1(P) ;
+  on(p) {
+    Range x = new BlockRange(N, p.dim(0)) ;
+
+    float [[,*]] a = new float [[x, N]], c = new float [[x, N]] ;
+    float [[*,]] b = new float [[N, x]], tmp = new float [[N, x]] ;
+
+    ... initialize `a', `b'
+
+    for(int s = 0 ; s < N ; s++) {
+
+      overall(i = x for :) {
+
+        float sum = 0 ;
+        for(int j = 0 ; j < N ; j++)
+          sum += a [i, j] * b [j, i] ;
+
+        c [i, (i` + s) % N] = sum ;
+      }
+
+      // cyclically shift `b' (by amount 1 in x dim)...
+
+      Adlib.cshift(tmp, b, 1, 1) ;
+      HPspmd.copy(b, tmp) ;
+    }
+  }
+\end{verbatim}
+\normalsize
+\caption{A pipelined matrix multiplication program.\label{fig:pipedMatmul}}
+\end{figure}
+
+At the time of writing the HPJava translator is partially operational.
+Ongoing work will complete the functionality, and add some optimization
+for the generated code.  The language definition calls for full
+compile-time or runtime checking of the constraints on locality of
+reference.  The translator will be enhanced to add these.  Early
+benchmarks results will be included in the final version of this paper.
+
+\section{Acknowledgements}
+
+This work was supported in part by the National Science Foundation
+Division of Advanced Computational Infrastructure and Research,
+contract number 9872125.
+
+\bibliographystyle{plain}
+\bibliography{project}
+
+\end{document}
+

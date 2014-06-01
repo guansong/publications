@@ -1,0 +1,63 @@
+\section{Project in progress}
+
+Projects related to this work include development of MPI, HPF,
+and other parallel languages such as ZPL and Spar,
+introduced elsewhere\footnote{For more analysis, please refer to our
+documents at http://www.npac.syr.edu/projects/pcrc/doc}.  Here we
+explain the background and future developments of our own
+project.
+
+The work originated in our compilation practices for HPF. As described
+in \cite{Zha97}, our compiler emphasize runtime support.
+\emph{Adlib}\cite{Car98}, a PCRC runtime kernel library, provides a
+rich set of collective communication functions.  It was realized that
+by raising the runtime interface to the user level, a rather
+straightforward (compared to HPF) compiler could be developed to
+translate the high level language code to a node program calling the
+runtime functions.
+
+Currently, a Java interface has been implemented on top of the Adlib
+library.  With classes such as \texttt{Group}, \texttt{Rang} and
+\texttt{Location} in the Java interface, one can write Java programs
+quite similar to HPJava we proposed here. Yet, the program executed in
+this way will have large overhead due to function calls (such as
+address translation) when accessing data inside loop constructs.
+
+Given the knowledge of data distribution plus inquiry functions inside
+runtime library, one can substitute address translation calls with
+linear operation on the loop variable, and keep most of the inquiry
+function calls outside the loop. This is the basic idea of
+the HPJava compiler.
+
+At present time, we are working on the design and implementation of
+the prototype of this translator.  Further research works
+will include optimization and safety-checking techniques in the
+compiler for HPspmd programming.
+
+Figure \ref{fig:performance} shows a preliminary benchmark for hand
+translated versions of our examples. The parallel programs are executed
+on 4 sparc-sun-solaris2.5.1 with mpich MPI and Java JIT compiler in
+JDK 1.2Beta2. For Jacobi iteration, the timing is for about 90
+iterations, the array size is 1024X1024.
+
+\begin{figure}[ht]
+  \begin{center}
+    \leavevmode
+%    \putfig{Jacobi4.eps}{0.58}
+    \psfig{figure=Jacobi4.eps,width=3in}
+    \caption{Preliminary performance}
+    \label{fig:performance}
+  \end{center}
+\end{figure}
+
+We also compared the sequential Java, C++ and Fortran version of the
+code, all with \texttt{-O} flag. Shown in the figure. Since Java
+program use language own mechanism for calculating array element
+address, it is slower than HPJava, which uses an optimized scheme.
+
+Similar test was made on an 8-node SGI challenge(mips-sgi-irix6.2),
+the communication time is much smaller than the one on solaris, due to
+MPI device using shared memory.  The overall performance is not as
+good, because the JIT compiler on IRIX. The whole system are also
+being ported to Windows NT.
+

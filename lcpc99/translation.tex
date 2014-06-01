@@ -1,0 +1,933 @@
+
+\documentclass{article}
+
+\usepackage{psfig}
+
+\begin{document}
+
+\newtheorem{usageRule}{Rule}
+
+\sloppy
+
+\pagestyle{plain}
+
+\title{Semantic Checking in {\em HPJava}}
+
+\author{Bryan Carpenter, Geoffrey Fox and Guansong Zhang\vspace{0.2in} \\ 
+        \em Northeast Parallel Architectures Centre, \\
+        \em Syracuse University, \\
+        \em 111 College Place, \\
+        \em Syracuse, New York 13244-410 \\
+        \em \{dbc,gcf,zgs\}@npac.syr.edu}
+
+\maketitle
+
+\begin{abstract}
+The article discusses various rules about use of distributed arrays
+in {\em HPJava} programs.  These rules are peculiar
+to the HPspmd programming model.  They can be enforced by a
+combination of static semantic checks, compile-time analysis and
+compiler-generated run-time checks.  We argue that the the cost of any
+necessary run-time checks should be acceptable, because, by design,
+the associated computations can be lifted out of inner loops.
+\end{abstract}
+
+\section{Introduction}
+
+HPJava \cite{HPJava} is a Java language binding of a programming model
+we call the {\em HPspmd} model.  This is a particular version of the
+general SPMD programming model that adds special support for
+distributed arrays of the kind defined by the HPF standard.  The arrays
+are bound to the base language through a series of syntax extensions.
+The assumption is that the syntax extensions will be handled by a
+relatively simple preprocessor which emits an SPMD program in the base
+language.
+
+Of course this implementation strategy has been followed with varying
+degrees of success in many translation systems for HPF and similar
+languages \cite{HPFStandard,HPFBook}.  The difference in the HPspmd
+approach is that it is assumed the source code is already written in an
+explicitly MIMD style.  The HPspmd syntax provides only a thin veneer
+on low-level SPMD programming, and the transformations applied by the
+translator are relatively simple and direct---no non-trivial analysis
+should be needed to obtain good parallel performance.  Meanwhile
+the language model provides a uniform model of a distributed
+array, which can be targetted by libraries for parallel communication
+and arithmetic.
+
+Of course SPMD programming has been very successful.  There are
+countless applications written in the most basic SPMD style, using
+direct message-passing through MPI \cite{MPIStandard} or similar
+low-level packages.  Many higher-level parallel programming
+environments and libraries assume the SPMD style as their basic model.
+Examples include ScaLAPACK \cite{ScaLAPACK}, 
+%PetSc \cite{PETSc1},
+DAGH \cite{HDDA_DAGH},
+Kelp \cite{Block_structured} and the Global Array
+Toolkit \cite{Global_Arrays}.  While there remains a prejudice that HPF
+is best suited for problems with very regular data structures and
+regular data access patterns, SPMD frameworks like DAGH and Kelp have
+been designed to deal directly with irregularly distributed data, and
+other libraries like CHAOS/PARTI \cite{CHAOS} and Global Arrays support
+unstructured access to distributed arrays.
+
+These successes aside, the library-based SPMD
+approach to data-parallel programming lacks the uniformity
+and elegance of HPF.  All the environments referred to above have some
+idea of a distributed array, but they all describe those arrays
+differently.  Compared with HPF, creating distributed arrays and
+accessing their local and remote elements is clumsy and error-prone.
+Because the arrays are managed entirely in libraries, the compiler
+offers little support and no safety net of compile-time or
+compiler-generated run-time checking.  These observations
+motivate our introduction of the HPspmd model.
+
+This article concentrates in particular on the issue of semantic
+checking in HPspmd languages.  The basic features of the HPspmd
+language model are introduced in the Java context in section
+\ref{sec:HPJava}.  Section \ref{sec:sections} adds a discussion
+of {\em array sections}.  This discussion serves to introduce
+the ideas of subranges and general process groups in HPspmd.  
+Building on these ideas, section \ref{sec:usage} describes
+some general rules about access to distributed array elements, and
+section \ref{sec:compiling} describes how a translator can
+ensure these conditions are met. 
+
+\section{HPJava---an HPspmd language\label{sec:HPJava}}
+
+HPJava \cite{HPJava} is an instance of our HPsmpd language
+model.  HPJava extends its base language, Java, by adding some
+predefined classes and some additional syntax for dealing with
+distributed arrays.
+
+We aim to provide a flexible hybrid of the data parallel and low-level
+SPMD paradigms.  To this end HPF-like distributed arrays appear as
+language primitives.  But a design decision is made that all access to {\em
+non-local} array elements should go through library functions---either
+calls to a collective communication library, or simply {\tt
+get} and {\tt put} functions for access to remote blocks of a
+distributed array\footnote{The distributed arrays are orthogonal
+to the sequential arrays of the base language---we deliberately
+keep them completely separate.}.
+
+A subscripting syntax is applied to distributed arrays to reference
+elements.  But an array element reference must not imply access to a
+value held on a different processor.  To simplify the task of the
+programmer, who must be sure accessed elements are held locally, the
+languages adds {\em distributed control} constructs.
+These play a role something like the {\tt ON HOME} directives of HPF
+2.0 and earlier data parallel languages \cite{Kali}.  One special
+control construct---a distributed parallel loop---facilitates traversal
+of locally held elements from a group of aligned arrays.
+
+Array mapping is described in terms of a slightly different set of
+basic concepts from HPF.  {\em Process group} objects generalize the
+processor arrangements of HPF.  {\em Distributed range} objects are
+used instead HPF templates.  A distributed range is comparable with a
+single dimension of an HPF template.  These substitutions are a change
+of parametrization only.  Groups and ranges fit better with our
+distributed control constructs.
+
+\begin{figure*}[tbp]
+\small
+\begin{verbatim}
+  Procs2 p = new Procs2(P, P) ;
+  on(p) {
+    Range x = new BlockRange(M, p.dim(0)) ;
+    Range y = new BlockRange(N, p.dim(1)) ;
+
+    float [[,]] a = new float [[x, y]], b = new float [[x, y]],
+                c = new float [[x, y]] ;
+
+    ... initialize values in `a', `b'
+
+    overall(i = x for :)
+      overall(j = y for :)
+        c [i, j] = a [i, j] + b [i, j] ;
+  }
+\end{verbatim}
+\normalsize
+\caption{A parallel matrix addition.\label{fig:addition}}
+\end{figure*}
+
+Figure \ref{fig:addition} is a simple example of an HPJava program.  It
+illustrates creation of distributed arrays, and access to their
+elements.  The class {\tt Procs2} is a standard library class derived
+from the special base class {\tt Group}.  It represents a
+two-dimensional grid of processes.  Similarly the distributed range class
+{\tt BlockRange} is a library class derived from the special class {\tt
+Range}; it denotes a range of subscripts distributed with
+BLOCK distribution format over a specific process dimension.  Process
+dimensions associated with a grid are returned by the {\tt dim()}
+inquiry.
+The {\tt on(p)} construct is a new control construct specifying that
+the enclosed actions are performed only by processes in group {\tt p}.
+
+The variables {\tt a}, {\tt b} and {\tt c} are all distributed array
+objects.  The type signature of an $r$-dimensional distributed array
+involves double brackets surrounding $r$ comma-separated slots.  The
+constructors specify that these all have ranges {\tt x} and {\tt y}---they
+are all {\tt M} by {\tt N} arrays, block-distributed over {\tt p}.
+
+A second new control construct, {\em overall}, implements a distributed
+parallel loop.  The
+constructs here iterate over all locations (selected by the degenerate
+interval ``\verb$ : $'') of ranges \verb$x$ and \verb$y$.  The symbols
+{\tt i} and {\tt j} scoped by these constructs are {\em bound
+locations}.  In HPF, a distributed array element is referenced using
+integer subscripts, like an ordinary array.  In HPJava, with a couple
+of exceptions noted below, the subscripts in element references must be
+bound locations, and these must be locations in the range associated
+with the array dimension.  This rather drastic restriction is a
+principal means of ensuring that referenced array elements are held
+locally.
+
+\begin{figure}[btp]
+
+\small
+\begin{verbatim}
+  Procs2 p = new Procs2(P, P) ;
+  on(p) {
+    Range x = new ExtBlockRange(N, p.dim(0), 1, 1) ;
+    Range y = new ExtBlockRange(N, p.dim(1), 1, 1) ;
+
+    float [[,]] u = new float [[x, y]] ;
+
+    ... some code to initialise `u'
+
+    for(int iter = 0 ; iter < NITER ; iter++) {
+
+      Adlib.writeHalo(u) ;
+
+      overall(i = x for 1 : N - 2)
+        overall(j = y for 1 + (i` + iter) % 2 : N - 2 : 2)
+          u [i, j] = 0.25 * (u [i - 1, j] + u [i + 1, j] +
+                             u [i, j - 1] + u [i, j + 1]) ;
+    }
+  }
+\end{verbatim}
+\normalsize
+
+\caption{\label{fig:redBlack}Red-black iteration.}
+\end{figure}
+
+The general policy is relaxed slightly to simplify coding of stencil
+updates.  A subscript can be a {\em shifted location}.  Usually
+this is only legal if the subscripted array is declared with suitable {\em
+ghost regions} \cite{Ghost}.  Figure \ref{fig:redBlack} illustrates the
+use of the standard library class {\tt ExtBlockRange} to create arrays with
+ghost extensions (in this case, extensions of width 1 on either side of
+the locally held ``physical'' segment).  A function, {\tt writeHalo}, from
+the communication library Adlib updates the ghost region.  This example
+also illustrates application of a postfix backquote operator to a bound
+location.  The expression {\tt i`} (read ``i-primed'') yields the integer
+global loop index.
+
+Distributed arrays can be defined with some sequential dimensions.  The
+sequential attribute of an array dimension is flagged by an asterisk in
+the type signature.  As illustrated in Figure \ref{fig:pipedMatmul},
+element reference subscripts in sequential dimensions can be ordinary
+integer expressions.
+
+% (Original position of Figure \ref{fig:pipedMatmul})
+
+\begin{figure}[tbp]
+\small
+\begin{verbatim}
+  Procs1 p = new Procs1(P) ;
+  on(p) {
+    Range x = new BlockRange(N, p.dim(0)) ;
+
+    float [[,*]] a = new float [[x, N]], c = new float [[x, N]] ;
+    float [[*,]] b = new float [[N, x]], tmp = new float [[N, x]] ;
+
+    ... initialize `a', `b'
+
+    for(int s = 0 ; s < N ; s++) {
+
+      overall(i = x for :) {
+
+        float sum = 0 ;
+        for(int j = 0 ; j < N ; j++)
+          sum += a [i, j] * b [j, i] ;
+
+        c [i, (i` + s) % N] = sum ;
+      }
+
+      // cyclically shift `b' (by amount 1 in x dim)...
+
+      Adlib.cshift(tmp, b, 1, 1) ;
+      HPspmd.copy(b, tmp) ;
+    }
+  }
+\end{verbatim}
+\normalsize
+\caption{A pipelined matrix multiplication program.\label{fig:pipedMatmul}}
+\end{figure}
+
+
+The short examples here have covered the basic syntax of HPJava.  The
+language itself is relatively simple.  Complexities associated with
+varied and irregular patterns of communication are dealt with in
+libraries, which can implement many richer operations than the {\tt
+writeHalo} and {\tt cshift} functions of the examples.  The remaining
+important extensions to the language itself can be motivated most
+easily by considering the need to support Fortran 90 style {\em
+sections} of distributed arrays.
+
+\section{Array sections\label{sec:sections}}
+
+% (Move Figure \ref{fig:pipedMatmul} here to avoid it appearing on a
+% separate page)
+
+HPJava has a syntax for representing subarrays.  An {\em array
+section expression} has a similar syntax to a distributed array element
+reference, but uses double brackets.  Whereas an element reference is a
+variable, an array section is an expression representing a new
+distributed array object.  The new array contains a subset of the
+elements of the parent array.  Those elements can subsequently be
+accessed either through the parent array {\em or} through the array
+section.  The HPJava implementation of an array section is closely
+related to the Fortran 90 idea of an array pointer---in Fortran an
+array pointer can reference an arbitrary regular section of a target
+array.
+
+In the previous section it was stated that the subscripts in a
+distributed array element reference are either {\em locations} or
+(restrictedly) integer expressions.  Options for subscripts in array
+section expressions are freer.  For example, a
+section subscript is allowed be a triplet.
+In the simplest kinds of array section
+the rank of the result is equal to the number of triplet
+subscripts.  If the section also has some scalar subscripts,
+this will be lower than the rank of the parent array.
+We would like to be able define the mapping of an arbitrary array
+section.
+
+The mapping of a distributed array is defined
+by its {\em distribution group} and its list of ranges.
+In earlier examples the distribution group of arrays defaulted to the
+process group specified by the surrounding on construct.
+In general the distribution group can be specified explicitly
+by appending an ``on'' clause to constructor itself:
+\small
+\begin{tabbing}
+\verb$    new ${\em type }\verb$[[$$x_0$\verb$, $$x_1$\verb$, ...]] on $$p$
+\end{tabbing}
+\normalsize
+Here each of $x_0, x_1, \ldots$ is a range object or an integer
+(in which case the dimension is sequential), and $p$ is a group
+contained within the set of processes that create the array.
+The ranges must be distributed over distinct dimensions of $p$.
+If there is any dimension of $p$ which is not a distribution target
+of some range from $x_0, x_1, \ldots$, the array is {\em replicated}
+over that process dimension.
+The inquiries {\tt grp} and {\tt rng(int r)} return the group and ranges
+for any array\footnote{For a sequential dimension the result of {\tt
+rng(r)} is a member of the subclass {\tt CollapsedRange}.}.
+
+\begin{figure*}[tbp]
+\centerline{\psfig{figure=section2.eps,width=4in}}
+\caption{A two-dimensional section of a two-dimensional array
+(shaded area).\label{fig:section2}}
+\end{figure*}
+
+Now consider array section {\tt b} defined by
+\small
+\begin{verbatim}
+    float [[,]] a = new float [[x, y]] on p ;
+
+    float [[,]] b = a [[0 : N - 1 : 2, 0 : N / 2 - 1]] ;
+\end{verbatim}
+\normalsize
+(see Figure \ref{fig:section2}).  What are the ranges of {\tt b}?
+In fact they are new kind of range called a {\em subrange}.
+For completeness there is a special syntax for constructing subranges
+directly:
+\small
+\begin{verbatim}
+    Range u = x [0 : N - 1 : 2] ;
+    Range v = y [0 : N / 2 - 1] ;
+\end{verbatim}
+\normalsize
+The extents of both {\tt u} and {\tt v} are {\tt N / 2}.
+
+The {\em distribution group}
+of {\tt b} can be identified with the distribution
+group of the parent array {\tt a}.  
+But sections constructed using a scalar subscript, eg
+\small
+\begin{verbatim}
+    float [[]] c = a [[0, :]]
+\end{verbatim}
+\normalsize
+(see Figure \ref{fig:section1}) present another problem.  Clearly {\tt
+c.rng(0)} is {\tt y}.  But identifying the distribution group of {\tt
+c} with {\tt p} is not right.  It would imply that {\tt c} is
+replicated over the first dimension of {\tt p}.  Where does the
+information that {\tt c} is localized to the top row of processes go?
+
+\begin{figure*}[tbp]
+\centerline{\psfig{figure=section1.eps,width=4in}}
+\caption{A one-dimensional section of a two-dimensional array
+(shaded area).\label{fig:section1}}
+\end{figure*}
+
+We are driven to define a new kind of group: a {\em restricted group} is
+the subset of processes in some parent group to which a particular
+location is be mapped.  The distribution group of
+{\tt c} is defined to be the subset of processes in {\tt p} to which
+the location {\tt x[0]} is mapped.  It can be written explicitly as%
+\footnote{The expression {\tt x[0]} is ``pure syntax'' in HPJava.  
+There is no Java type associated with a location
+and no way to store a location value in a variable.  The only named
+locations in HPJava are the bound locations scoped by overall
+(and {\em at}---see section \ref{sec:discussion}).
+Besides group restrictions, expressions like {\tt x[0]} can legally appear
+as array section subscripts or in the header of an at construct.}
+\small
+\begin{verbatim}
+    p / x [0]
+\end{verbatim}
+\normalsize
+An equivalent definition of a restricted group is as some slice of a
+process grid, chosen by restricting some of the coordinates to single
+values.  
+
+The idea of a restricted group may look slightly ad hoc, but the
+implementation is quite elegant.  A restricted group is uniquely
+specified by its set of effective process dimensions and the identity
+of the {\em lead} process in the group---the process with coordinate
+zero relative to the effective dimensions.  The dimension set can be
+specified as a subset of the dimensions of the parent grid using a
+simple bitmask.  The identity of the lead process can be specified
+through a single integer ranking the processes of the parent grid.  So
+a general (restricted) HPJava group can be fully parametrized by a
+reference to the parent process grid together with just two {\tt int}
+fields.
+
+Now we can formally define of the mapping
+of a typical array section.  As a matter of
+definition an integer subscript $n$ in dimension $r$ of
+array $a$ is equivalent to a location-valued subscript
+$a${\tt .rng(}$r${\tt )[}$n${\tt ]}.
+By definition, a triplet subscript $l${\tt :}$u${\tt :}$s$ in the same
+dimension is equivalent to range-valued subscript
+$a${\tt .rng(}$r${\tt )[}$l${\tt :}$u${\tt :}$s${\tt ]}.
+If all integer and triplet subscripts in a section are replaced by their
+equivalent location or range subscripts, and the
+location-valued subscripts are $i, j, \ldots$, then the
+distribution group of the section is
+\small
+\begin{tabbing}
+\verb$    $$a$\verb$.grp() / $$i$\verb$ / $$j$\verb$ / ...$
+\end{tabbing}
+\normalsize
+and the $s$th range of the section is equal to the $s$th range-valued
+subscript.
+
+Subranges and restricted groups can be used in array constructors on
+the same footing as the ranges and grids introduced earlier.
+This enables HPJava arrays to reproduce any alignment option
+allowed by the {\tt ALIGN} directive of HPF.
+
+\section{Variable usage rules\label{sec:usage}}
+
+A basic principle of the HPspmd model is that a program can only
+directly reference locally held variables.  Therefore
+we want to define the conditions under which it is legal to
+access a particular variable (most especially, a particular
+array element) at a particular point in a program.
+
+In a distributed array element reference,
+as explained in section \ref{sec:HPJava}, a subscript in 
+a distributed dimension of an array must be a bound location,
+and this location must be a location in the appropriate range of the array%
+\footnote{We can relax this restriction slightly by adding rules for
+identifying locations in certain closely related ranges.
+For example it is very natural to regard the locations in a subrange
+to be a subset of the locations in the parent range.}%
+.  Hence
+\begin{usageRule}
+Subscripts in distributed array element references must be bound
+locations (unless the relevant dimension is sequential).
+\end{usageRule}
+and
+\begin{usageRule}
+If a location appears as a subscript,
+it must be a location in the relevant range of the array.
+\end{usageRule}
+
+The rules just stated go a long way towards ensuring that only local
+elements are accessed, but they don't cover all cases.
+Consider the example of Figure \ref{fig:accessError}.
+The subscripts on the element reference {\tt c[j]} are legal---{\tt j}
+is a location in {\tt c.rng(0)} (which is equal to {\tt y}).
+But, referring to Figure \ref{fig:section1}, the section
+{\tt c} is localized to {\tt p/x[0]}---the top row of processes
+in the figure---whereas the on construct
+specifies that the element assignments are performed in the group
+{\tt p/x[7]}---the bottom row of processes.
+
+\begin{figure*}[tbp]
+\small
+\begin{verbatim}
+    Procs2 p = new Procs2(P, P) ;
+
+    Range x = new BlockRange(N, p.dim(0)) ;
+    Range y = new BlockRange(N, p.dim(1)) ;
+
+    float [[,]] a = new float [[x, y]] on p ;
+
+    float [[]]  c = a [[0, :]] ;
+
+    on(p / x [N - 1])
+      overall(j = y for :)
+        c [j] = j` ;               // error!
+\end{verbatim}
+\normalsize
+\caption{Erroneous access to non-local elements of a section
+\label{fig:accessError}}
+\end{figure*}
+
+Before we can give a general rule about accesses to elements
+of distributed arrays we need to refine the concept of the
+{\em active process group}.  Suppose the set of processes currently executing
+the program text is represented by the group $q$, and the construct
+\small
+\begin{tabbing}
+\verb$    on($$p$\verb$) $$S$
+\end{tabbing}
+\normalsize
+appears.  For the body, $S$, of this construct, the active process group is
+changed to $p$.  The group $p$ must represent a subset of the processes
+in $q$.
+Similarly, suppose the current active process group is $q$, and the
+construct 
+\small
+\begin{tabbing}
+\verb$    overall($$i$\verb$ = $$x$\verb$ for $$l$\verb$ : $$u$\verb$ : $$s$\verb$) $$S$
+\end{tabbing}
+\normalsize
+appears.  For $S$ the active process group is changed to $q / i$.
+Unless $x$ is a collapsed range, the process dimension over which it
+is distributed {\em must be a dimension of $q$}.
+
+Applied recursively these rules define the active process group at any
+point in a legal HPJava program.
+
+Next we will define the {\em home group} of a program variable.
+The home group of an ordinary variable (not a distributed array element) is
+the group that was active at the point of declaration of the variable.
+For a distributed array element the rule is similar to the definition of
+distribution groups of section: suppose the subscripts in the reference
+\small
+\begin{tabbing}
+\verb$    $$a$\verb$ [$$e_0$\verb$, $$e_1$\verb$, ...]$
+\end{tabbing}
+\normalsize
+include locations $i, j, \ldots$, then the home group of the array
+element is%
+\footnote{As a matter of definition, for a shifted location
+$\mbox{\tt p} / (\mbox{\tt i} \pm \mbox{\em expression}) \equiv
+\mbox{\tt p} / \mbox{\tt i}$.
+The rationale is that a shifted location is supposed to find an array
+element in the same process as the original location (albeit that
+the element could be in a ghost region).}
+\small
+\begin{tabbing}
+\verb$    $$a$\verb$.grp() / $$i$\verb$ / $$j$\verb$ / ...$
+\end{tabbing}
+\normalsize
+(if the array has a replicated distribution this group may contain
+several processes; otherwise it contains a single process).
+
+An HPspmd rule for accessing a variable can be stated as follows:
+\begin{usageRule}
+A variable can only be accessed when the active process
+group is contained in the home group of the variable.
+\end{usageRule}
+This is essentially a statement that all processes executing the
+current text must hold a copy of any variable accessed.
+Strictly speaking it is slightly stronger than the requirement that 
+the local process holds a copy of any element it accesses.
+%We will consider alternative formulations in the next section.
+The version given here is convenient for formal discussion of
+programs.
+
+%Note that a distributed array variable (such as $a$ itself) is regarded
+%as an ordinary variable and therefore has a home group.  In simple
+%cases this home group may coincide with the distribution group of the
+%referenced array (see the examples of section \ref{sec:HPJava}), but
+%this is by no means true in all cases---it is not true of most examples
+%from section \ref{sec:sections}.
+
+\section{Compiling usage checks\label{sec:compiling}}
+
+It is very important for the efficiency of HPJava programs that inner loops
+in the translated code---especially those derived from overall
+constructs in the source program---be kept as simple as possible.  For
+example, the body of the emitted loop should avoid calls to methods
+associated with the runtime descriptor of the distributed array
+(unless, say, the programmer forced appearance of these calls by
+including them in the source).  In particular runtime checking
+code associated with references to distributed array element should be
+lifted out of loops wherever possible.
+
+Rule 1 can be enforced at compile
+time by a trivial extension to normal type checking.  So far as Rule 2
+is concerned, the intention is that run-time checks
+needed to enforce this rule should be lifted outside of the
+loop body.  Consider this fragment
+\small
+\begin{tabbing}
+\verb$    overall($$i$\verb$ = $$x$\verb$ for $$l$\verb$ : $$u$\verb$ : $$s$\verb$) {$ \\
+\verb$      ...$ \\
+\verb$        ... $$a$\verb$ [..., $$i$\verb$, ...] ...$ \\
+\verb$    }$
+\end{tabbing}
+\normalsize
+where $i$ is the $r$th subscript in the list.  Of course the expression
+$a$ must be a distributed array.  A naive insertion of runtime checks
+might lead to code something like
+\small
+\begin{tabbing}
+\verb$    overall($$i$\verb$ = $$x$\verb$ for $$l$\verb$ : $$u$\verb$ : $$s$\verb$) {$ \\
+\verb$      ...$ \\
+\verb$        ASSERT($$a$\verb$.rng($$r$\verb$).containsLocation($$x$\verb$, $$i$\verb$`)) ;$ \\
+\verb$        ... $$a$\verb$ [..., $$i$\verb$, ...] ...$ \\
+\verb$    }$
+\end{tabbing}
+\normalsize
+with the runtime test appearing immediately before the element reference.
+What we want to achieve instead is something like
+\small
+\begin{tabbing}
+\verb$    ASSERT($$a$\verb$.rng($$r$\verb$).containsSubrange($$x$\verb$, $$l$\verb$, $$u$\verb$, $$s$\verb$)) ;$ \\
+\verb$    overall($$i$\verb$ = $$x$\verb$ for $$l$\verb$ : $$u$\verb$ : $$s$\verb$) {$ \\
+\verb$      ...$ \\
+\verb$        ... $$a$\verb$ [..., $$i$\verb$, ...] ...$ \\
+\verb$    }$
+\end{tabbing}
+\normalsize
+In fact we expect that in {\em typical} HPJava programs this
+transformation will be legal.  In simple cases there may even be enough
+static information about the ranges of $a$ to eliminate the run-time
+check altogether, because the lifted assertion can be proven at compile
+time.  
+
+There are cases where lifting the usage check may be problematic.
+Consider this example
+\small
+\begin{verbatim}
+    Range y = x [1 : N - 2] ;
+    float [[]] a = float [[y]] ;
+
+    overall(i = x for 0 : N - 1) {
+      ...
+      if(i` > 0 && i` < N - 1)
+        ... a [i] ...
+    }
+\end{verbatim}
+\normalsize
+The array is defined over some subrange of {\tt x}.  We iterate
+over the whole of {\tt x}, but mask the disallowed accesses with a
+nested conditional construct.  Such usage would block naive lifting of
+runtime range-checks out of the loop.  The lifted range-check would
+cause an exception although the code is apparently legal.
+Another potential difficultly is that the expression $a$ is not a loop
+invariant with respect to the overall construct scoping the subscript.
+For example:
+\small
+\begin{verbatim}
+    float [] [[]] s = new float [n] [[]] ;
+    ... allocate individual distributed arrays in `s' ...
+
+    overall(i = x for :) {
+      ...
+      for(int j = 0 ; j < n ; j++)
+        s [j] [i] = foo(j, i`) ;
+    }
+\end{verbatim}
+\normalsize
+The variable {\tt s} is a Java array of HPJava distributed arrays.
+The array expression, $a$, is now {\tt s[j]}.  This expression is
+not loop invariant with respect to the overall construct.
+Without detailed (and not obviously practical) compile-time analysis
+the range check for the distributed array reference cannot be
+lifted out of the loops%
+\footnote{Both examples would probably lead to inefficient translated
+code anyway, because various other computations associated with element
+reference cannot be lifted out of loops.}%
+.
+
+We assume these uses are idiosynchratic.  In the first case
+the desired effect could be normally achieved more directly by
+changing the triplet in the overall header%
+\footnote{We emphasize that the problem here is not with appearance of
+conditional code in general inside an overall construct---it is only
+with use of conditional code to mask element references otherwise
+forbidden by range-checking considerations.}%
+:
+\small
+\begin{verbatim}
+    overall(i = x for 1 : N - 2) {
+      ...
+      ... a [i] ...
+    }
+\end{verbatim}
+\normalsize
+In the second example the appearance of {\tt i} as a common subscript for all
+distributed arrays in {\tt s} strongly suggests that these have a
+common range, probably {\tt x}.  So replacing {\tt s} with a two-dimensional
+distributed array,
+\small
+\begin{verbatim}
+    float [[*,]] s = new float [[n, x]] ;
+\end{verbatim}
+\normalsize
+would probably be acceptable, and would remove the blockage to lifting
+the range-check.
+
+Because efficient translation is a primary concern, and the
+examples above are difficult to translate efficiently, we outlaw them
+by adding a new rule
+\begin{usageRule}
+Logically, the effects of any bound location subscripts appearing in
+a program are resolved at the head of the construct that scopes the
+location.
+\end{usageRule}
+Interpretations of this rule (which is more pragmatic than
+beautiful) include
+\begin{description}
+\item{a)}
+a range check error may be thrown by the overall construct, even if
+later conditional code masks the element usage---so far as range
+checks are concerned the use is assumed to be unconditional---and
+\item{b)}
+if a bound location subscript is applied to a distributed array
+expression (in an element reference or array section), the array
+expression must be invariant in the scope of the location.
+\end{description}
+The translator may apply suitable dataflow analysis to verify condition
+b)%
+\footnote{Dependence of the array expression on field variables
+(effectively global variables) may frustrate this analysis, if method
+calls also appear inside the loops.}%
+.
+
+Next we consider Rule 3 of section \ref{sec:usage}.
+We assume that the translator makes the current state of the
+active process group visible in a variable of type {\tt Group}
+called {\tt apg}%
+\footnote{The variable {\tt apg} is not a conventional Java global
+variable.  It is more closely akin to the {\tt this} expression of
+Java.  It will be passed to HPJava-aware methods through a hidden
+argument.}%
+.  Most naively, the range checks for the example in Figure
+\ref{fig:accessError} could be inserted as follows:
+\small
+\begin{verbatim}
+    float [[,]] a = new float [[x, y]] on p ;
+
+    float [[]]  c = a [[0, :]] ;
+
+    on(p / x [N - 1])
+      overall(j = y for :) {
+        ASSERT((c.grp() / j).contains(apg)) ;
+        c [j] = j` ;
+      }
+\end{verbatim}
+\normalsize
+We note, however, that this can be optimized by lifting the assertion
+through the overall scoping {\tt j}:
+\small
+\begin{verbatim}
+    on(p / x [N - 1]) {
+      ASSERT(c.grp().contains(apg)) ;
+      overall(j = y for :)
+        c [j] = j` ;
+   }
+\end{verbatim}
+\normalsize
+and the lifted assertion is even simpler to compute, because the
+restriction by {\tt j} is no longer needed.
+
+In general in
+\small
+\begin{tabbing}
+\verb$    overall($$j$\verb$ = $$y$\verb$ for $$l$\verb$ : $$u$\verb$ : $$s$\verb$) {$ \\
+\verb$      ...$ \\
+\verb$        ASSERT(($$a$\verb$.grp() / ... / $$i$\verb$ / $$j$\verb$ / $$k$\verb$ / ... ).contains(apg)) ;$ \\
+\verb$        ... $$a$\verb$ [..., $$j$\verb$, ...] ...$ \\
+\verb$        ...$ \\
+\verb$    }$
+\end{tabbing}
+\normalsize
+provided the ellided code between the overall header and the assertion
+contains no statements that change {\tt apg} (ie, no other
+overall or on headers) the assertion can be lifted and simplified as follows:
+\small
+\begin{tabbing}
+\verb$    ASSERT(($$a$\verb$.grp() / ... / $$i$\verb$ / $$k$\verb$ / ... ).contains(apg)) ;$ \\
+\verb$    overall($$j$\verb$ = $$y$\verb$ for $$l$\verb$ : $$u$\verb$ : $$s$\verb$) {$ \\
+\verb$      ...$ \\
+\verb$        ... $$a$\verb$ [..., $$j$\verb$, ...] ...$ \\
+\verb$        ...$ \\
+\verb$    }$
+\end{tabbing}
+\normalsize
+We can legitimize the lifting, even if the element reference appears in
+conditional code inside the loop, by appealing to Rule 4.  If overall
+constructs are suitably nested this transformation can be applied
+recursively.
+
+Exact computation of the group {\tt contains} operation may be
+expensive---in principle it is a set containment test.  
+%An approximate
+%(stronger) definition which can be useful is that a process grid $p$ is
+%contained by $q$ if $q$ was {\tt apg} when $p$ was created, and that
+%any group $r / i$ is contained in $r$.  These two relations and their
+%closure can be computed relatively cheaply.  
+In the present case, where containment of the active process group is
+the issue, an alternative is available.  If all members
+of the active process group make the assertion
+\small
+\begin{tabbing}
+\verb$    ASSERT($$p$\verb$.contains(apg)) ;$
+\end{tabbing}
+\normalsize
+this is essentially equivalent to them all making the assertion
+\small
+\begin{tabbing}
+\verb$    ASSERT($$p$\verb$.amMember()) ;$
+\end{tabbing}
+\normalsize
+The {\tt amMember} method on a group returns true if the the local
+process is a member of the group and false otherwise.  If the {\tt
+contains} assertion is false, then at least one member of the active
+process group will throw an exception.  If an exception is expected to
+abort the program globally, this is probably good enough.  The {\tt
+amMember} function can be computed very efficiently---in fact an extra
+boolean field should be added to the {\tt Group} record containing this
+precomputed value, so it is simply a lookup.
+
+Whether this approximation to the exact {\tt contains} test is
+acceptable in practise is a slightly open issue.  In ``normal'' styles
+of HPJava programming we expect that it is essentially equivalent to
+the exact set containment test.  But in principle its adoption
+alters the semantics of the program.  Replacing {\tt contains} by {\tt
+amMember} only weakens the requirement of Rule 3, which may not be
+a problem, unless Java-like exact exception handling is expected.
+In general our policy of lifting runtime checks is somewhat at odds
+with the Java ethos that exceptions should be thrown and control
+switched at exactly the point where the error (eg, the erroneous
+subscripting operation) occurred.  In HPJava the most important thing
+is to get good performance, and probably some aspects of the strict
+Java exception model have to be sacrificed.
+
+We did not discuss use of shifted locations as subscripts.  They do not
+introduce any fundamental issues.  A runtime inquiry on array ranges
+will be needed giving the size of the ghost extensions.  Rule 4 can be
+interpretted to mean that use of non-invariant expressions for the
+shift-amounts is disallowed.
+
+\section{Other Usage Rules}
+
+In this section we mention two usage guidelines which have some
+relationship to the usage rules of the previous sections, but which
+are {\em not} required to make a legal HPJava program, and are not
+checked by the translator.
+
+The first relates to a {\em coherence} property of variables.
+Informally, we will call a variable coherent if, at corresponding stages
+of execution of an SPMD program, processes belonging to the
+variable's home group always hold identical values in their local copies
+of the variable.  If the home group of a variable is a single process,
+the variable is trivially coherent.
+
+Giving a precise formal definition of coherence is quite difficult,
+because it is difficult to define formally what is meant by
+``corresponding stages of execution''.  What we can give is
+a precise rule which will keep all variables in a program coherent.
+This rule, which looks similar to usage Rule 3, is
+\begin{usageRule}
+A variable should only be updated when the active process
+group is identical to the home group of the variable.
+\end{usageRule}
+Assuming that any external method calls also respect the coherence
+property\footnote{Examples of methods that do {\em not} respect
+coherence include functions like {\tt MPI\_Comm\_rank}, which return
+results intrinsically dependent on process id.} we assert that
+if this rule is applied throughout a program it will ensure all
+variable stay coherent.  An HPspmd translater does not try to enforce
+this rule because the associated checks can be very expensive, and
+because judicious use of incoherence is often convenient.
+
+It is often required that scalar arguments of collective operations
+should be coherent.  There is another common requirement collective
+operations on arrays---namely that all copies of all
+elements of array arguments should be held in the group of processes
+that collectively invoke the operation.  We will say that a distributed
+array $a$ is {\em fully contained} (in the active process group) if
+$a\mbox{\tt .grp()} \subseteq \mbox{\tt apg}$.  Therefore a natural
+requirement is
+\begin{usageRule}
+All distributed array arguments of collective operations should
+be fully contained.
+\end{usageRule}
+This rule is not required for all non-local operations.  For example
+it is not required for {\tt get} and {\tt put} operations that
+implement one-sided communication.  So it is not appropriate for
+the translator to try to enforce this rule.  Instead checks such
+as
+\small
+\begin{verbatim}
+    ASSERT(apg.contains(a.grp())) ;
+\end{verbatim}
+\normalsize
+should appear inside the implementation of collective library functions,
+as required.
+
+\section{Discussion\label{sec:discussion}}
+
+We have outlined a set of usage rules that HPspmd programs must
+follow to ensure that only locally available array elements are
+accessed directly.  Special control constructs and other syntax in
+HPJava are designed to ensure that these rules can be
+enforced by a combination of static semantic checks, compile-time
+analysis and compiler-generated run-time checks.  We showed how the
+language can be set up to ensure that the cost of any run-time checks
+required should not be prohibitive, even taking into account the
+complex index spaces of HPF-like distributed arrays.
+
+The discussion has been in the context of a Java-based HPspmd language
+called HPJava.  In \cite{Bindings} we have outlined possible syntax
+extensions to Fortran to provide similar semantics to HPJava.
+One feature of the HPJava language that was not discussed in this
+article is the {\em at construct}.  This is very similar to the
+overall construct except that it specifies execution for a single
+location.  For the purposes of this article it can be regarded as
+a special case of overall.
+
+Two recent languages that have some similarities to our HPspmd
+languages are F-\,- and ZPL.  F-\,- \cite{FMM} is an extended Fortran
+dialect for SPMD programming.  It does not incorporate the HPF-like
+idea of a global index space, so most of the issues discussed in the
+this article do not arise in F-\,-.  ZPL \cite{ZPL} is a array parallel
+programming language for scientific computations.  ZPL uses pure array
+syntax for accessing its parallel arrays, and does not allow them to
+subscripted directly.  So the range-checking issues are unlikely to be
+directly comparable to those in HPJava.
+
+\section{Acknowledgements}
+
+This work was supported in part by the National Science Foundation
+Division of Advanced Computational Infrastructure and Research,
+contract number 9872125.
+
+\bibliographystyle{plain}
+\bibliography{translation}
+
+\end{document}
+

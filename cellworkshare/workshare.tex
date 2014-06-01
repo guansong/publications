@@ -1,0 +1,67 @@
+%\documentclass[twocolumn, 10pt]{article}
+%documentclass{article}
+%\usepackage{hyperref}
+
+\documentclass{llncs}
+%\usepackage{hyperref}
+
+\usepackage[pagewise]{lineno}
+\linenumbers
+
+\usepackage{graphicx}
+\usepackage{times}
+\usepackage[ruled]{algorithm2e}
+
+%\usepackage{psfig}
+
+%\pagestyle{empty}                         %%%% No page Numbering
+\pagestyle{plain}                         
+
+%\setlength{\textheight}{9.0in}
+%\setlength{\textwidth}{6.5in}             %%%% Preset settings
+%\setlength{\columnsep}{0.375in}
+%\setlength{\oddsidemargin}{0.0in}
+%\setlength{\topmargin}{0.0in}
+%
+%\setlength{\headheight}{0.0in}
+%\setlength{\headsep}{0.0in}
+%\setlength{\parindent}{1pc}
+%
+
+%------------------------------------------------------------------------- 
+%------------------------------------------------------------------------- 
+
+\begin{document}
+
+%--------------------
+
+\input{title}
+\input{abstract}
+
+%--------------------
+
+\input{section1}
+%introduction
+\input{section2}
+%clasification of openmp
+\input{section3}
+%parallel region set up
+\input{section4}
+%barrier implementation
+\input{section5}
+\input{section6}
+%performance data
+\input{epilog}
+
+
+%--------------------
+
+\bibliographystyle{unsrt}
+\bibliography{workshare}
+
+%--------------------
+
+\end{document}
+
+%------------------------------------------------------------------------- 
+%------------------------------------------------------------------------- 

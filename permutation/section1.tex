@@ -1,0 +1,47 @@
+\section{Background}
+
+There are many loop transformation techniques existing
+today\cite{All02}. And almost all of them can be applied for more than
+one kind of code optimizations. For example, loop interchange is
+widely used to improve data locality in cache management. Meanwhile it
+also can be used to exploit parallelism, such as vectorization, and
+even coarse-grained parallelism.  Unfortunately, the transformations
+for different optimization purposes do not always work in harmony.
+
+Suppose we have a loop nest, we all know that the loop with stride-one
+access of the references should be put to the innermost position to
+achieve maximum spatial reuse in cache. So a loop permutation
+algorithm will try to calculate such a loop order while keeping the
+dependence constrains of the original loop nest.
+
+On the other hand, in an automatic parallelizing compiler, one would
+like to parallelize the outermost loop to reduce the parallel region
+setup overhead, and leave more code in the inner loop for other
+optimization opportunities. For example, in a compiler supporting
+OpenMP \cite{Cha01} standard, the straight forward way of generating
+parallel code is to parallelize a loop as a parallel do. In this note,
+we will concentrate on this kind of \emph{parallelizable} loop only.
+
+Much research has studied different approaches to solve this problem.
+A well known technique is \emph{Unimodular transformation}
+\cite{Mic91}, a compound loop transformation algorithm aiming at
+integrating different loop transformations for a specific goal and
+target machine, reducing the problem of finding the best
+transformation combination to finding the best unimodular matrix.
+
+Another technique is \emph{Loop selection}\cite{All02}, which
+parallelizes all the parallelizable loops, then uses heuristics to
+select the next one as sequential, expecting to find more
+parallelizable loops after that. It is easier to implement compared to
+unimodular transformation.
+
+Our work is based on the idea of loop selection, but different from
+the original one in two aspects: a) given our target is an OpenMP node
+program, we only need to find one parallelizable loop, avoid
+generating code with nested parallelism; b) our heuristics are
+directly linked to data locality, unlike the original loop selection
+suggested to pick a loop with most ``$<$'' directions to parallelize.
+
+
+
+

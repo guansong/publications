@@ -1,0 +1,547 @@
+\section{Java language Binding} 
+
+{\tt String} is a class in Java, but there is language syntax, including
+construction and concatenation operations, to support it.  In
+HPJava, we add several similar \emph{built-in} classes.
+
+\subsection{Basic concepts}
+
+Key concepts in the programming model are built around {\em process
+groups}, used to describe program execution control in a parallel
+program.
+
+\paragraph{Process group.}
+\emph{Group} is a class representing a process group, typically
+with a grid structure and an associated set of {\em process
+dimensions}.  It has its subclasses that represent different grid
+dimensionalities, such as \texttt{Procs1}, \texttt{Procs2}, etc. For example,
+\small
+\begin{verbatim}
+Procs2 p = new Procs2(2,4);
+\end{verbatim}
+\normalsize
+An HPJava program will be executed in parallel across the processes
+of a grid. 
+
+\paragraph{Distributed dimension and index with position.}
+
+The elements of an ordinary array can be represented by an array name
+and an integer sequence.  Here, we have two concepts reflected by
+\texttt{int} values: an index to access each array element and a range
+that index can be chosen from.  In describing a distributed
+array, we use two new built-in classes in HPJava to represent the
+analogous concepts:
+\begin{itemize}
+\item A {\em range} maps an integer interval into a process dimension
+  according to certain distribution format. Ranges describe the extent
+  and mapping of array dimensions.
+
+\item A {\em location}, or slot, is an abstract element of a range. A
+  range can be regarded as a set of locations, actually it is a
+  one-to-one mapping between the global index and locations.
+\end{itemize}
+For example,
+\small
+\begin{verbatim}
+Range x = new BlockRange(100, p.dim(0)) ;
+Range y = new CyclicRange(200, p.dim(1)) ;
+\end{verbatim}
+\normalsize
+creates two ranges on the different process dimensions of the
+group \texttt{p}.  One is block distributed, the other is cyclic
+distributed.  There are 100 different \texttt{Location}
+items mapped by the range \texttt{x} from integers, for example,
+the first one is
+\small
+\begin{verbatim}
+Location i = x[0];
+\end{verbatim}
+\normalsize
+
+\paragraph{Subgroup and Subrange.}
+
+A {\em subgroup} is some slice of a process array, formed by
+restricting the process coordinates in one or more dimensions to
+single values. 
+
+Suppose {\tt i} is a location in a range distributed over a dimension
+of group {\tt p}. The expression
+\small
+\begin{verbatim}
+p / i
+\end{verbatim}
+\normalsize
+represents a smaller group---the slice of {\tt p} to which location
+{\tt i} is mapped.  
+
+Similarly, a {\em subrange} is a section of a range, parameterized by
+a global index {\em triplet}. Logically, it represents a subset of the
+locations of the original range.
+
+The syntax for a subrange expression is
+\small
+\begin{verbatim}
+x [ 1 : 49 ]
+\end{verbatim}
+\normalsize
+The symbol ``\texttt{:}'' is a special separator. It is used to compose
+a \emph{triplet} expression with optional \texttt{int} expressions to
+represent an integer subset. The default initial and final values are
+respectively zero and the extent of the range.  The default stride size
+is 1.
+
+\paragraph{Structured SPMD programming.}
+\label{SPMD}
+
+When a process group is defined, a set of ranges and
+locations are also implicitly defined, as shown in figure \ref{fig:group}.
+\begin{figure}[htbp]
+  \begin{center}
+    \leavevmode
+%    \putfig{group.eps}{1.00}
+    \psfig{figure=group.eps}
+    \caption{Structured processes group}
+    \label{fig:group}
+  \end{center}
+\end{figure}
+The two (primitive) ranges associated with dimensions of the group
+\texttt{p} are,
+\small
+\begin{verbatim}
+Range u=p.dim(0);  
+Range v=p.dim(1);
+\end{verbatim}
+\normalsize
+\texttt{dim()} is a member function that returns a range reference,
+directly representing a processor dimension.
+
+We can obtain a location in range \texttt{v}, and use it
+to create a new group,
+\small
+\begin{verbatim}
+Location j = v[1];
+Group q = p/j;
+\end{verbatim}
+\normalsize
+As shown in the figure, group \texttt{p} is highly \emph{structured},
+The notions introduced around it contribute to program execution
+control in the new programming language.
+
+In a traditional SPMD program, execution control is based on
+\texttt{if} statements and process id or rank numbers. In the new
+programming language, switching execution control is based on the
+structured process group.  For example, it is not difficult to guess
+that the following code:
+\small
+\begin{verbatim}
+on(p) {
+  ...
+}
+\end{verbatim}
+\normalsize
+will restrict the execution control inside the bracket to processes in
+group \texttt{p}.
+
+The language also provided well-defined constructs to split
+execution control across processes according to data items we want to
+access.  This will be discussed later.
+
+\subsection{Global variables}
+
+When an SPMD program starts on a group of $n$ processes, there will be
+$n$ control threads mapped to $n$ physical processors.
+In each control thread, the program can define variables in the same
+way as in a sequential program.  The variables created in this way are
+\emph{local variables}.  Their {\em names} may be replicated across
+processes, but they will be accessed individually (their scope is
+local to a process).
+
+Besides local variables, HPJava allows a program to define \emph{global
+variables}, explicitly mapped to a process group.  A global variable
+will be treated by the process group that creating it as a single
+entity.
+The language has special syntax for the definition of global data.
+Global variables are all defined by using the \texttt{new}
+operator from free storage.  When a global variable is created, a
+\emph{data descriptor} is also allocated to describe where the data are
+held.
+
+
+\paragraph{Data descriptor and global data.}
+
+The concept of data descriptor is not new. It exists in the Java
+language itself.  For example, the field \texttt{length} in the Java
+array reflects the fact that an array is accessed through a data
+descriptor.
+
+On a single processor, an array variable might be parametrized by a
+simple record containing a memory address and an \texttt{int} value
+for the the length.  On a multi-processor, a more complicated structure
+is needed to describe a distributed array.  The data descriptor specifies
+where the data is created, and how are they are distributed.  The
+logical structure of a descriptor is shown in figure
+\ref{fig:descriptor}.
+
+\begin{figure}[htbp]
+  \begin{center}
+    \leavevmode
+%    \putfig{descriptor.eps}{1.00}
+    \psfig{figure=descriptor.eps}
+    \caption{Descriptor}
+    \label{fig:descriptor}
+  \end{center}
+\end{figure}
+
+New syntax is added in HPJava to define data with descriptors.
+\small
+\begin{verbatim}
+on(p)
+  int # s = new int #;
+\end{verbatim}
+\normalsize
+creates a global scalar on the current executing process group. In the
+statement, \texttt{s} is a data descriptor handle, in HPJava term, a
+\emph{global scalar reference}.  The scalar contains an integer value.
+Global scalar references can be defined for any primitive type (or,
+in principle, class type) of Java.
+The symbol \texttt{\#} in the right hand side of the assignment
+indicates a data descriptor is allocated as the scalar is created.
+
+For a scalar variable, a field \texttt{value} is used to retrieve the
+value.
+\small
+\begin{verbatim}
+on(p) {
+  int # s = new int #;
+  s.value = 100;
+}
+\end{verbatim}
+\normalsize
+Figure \ref{fig:mapping} shows a possible memory mapping for this
+scalar on different processes. 
+\begin{figure}[htbp]
+  \begin{center}
+    \leavevmode
+%    \putfig{map.eps}{1.00}
+    \psfig{figure=map.eps}
+    \caption{Memory mapping}
+    \label{fig:mapping}
+  \end{center}
+\end{figure}
+Note, the value field of \texttt{s} is identical in each process in the
+current executing processes.   Replicated {\em value} variables are
+different from local variables with replicated {\em names}.  The
+associated descriptors can be used to ensure the value is maintained
+identically in each process, throughout program execution.
+
+The group inside a descriptor is called the \emph{data owner group}, it
+defines where the global values are held.
+\small
+\begin{verbatim}
+on(p)
+  int # s = new int # on q;
+\end{verbatim}
+\normalsize
+will set data owner field in the descriptor to group \texttt{q}.  In
+general this may be a subset of the default, \texttt{p} (the whole
+of the current active process group).
+
+%Note, the \texttt{on} clause only change the data owner, it does not
+%change the \emph{scope} of the variable. The above code is similar but
+%different from the following one.
+%\small
+%\begin{verbatim}
+%on(p)
+%  on(q) 
+%    int # s = new int #;
+%\end{verbatim}
+%\normalsize
+
+When defining a global array, it is not necessary to allocate a data
+descriptor for each array element.  So the syntax for defining a global
+array is not derived directly from the one for a scalar.  An array
+can defined with different kinds of ranges introduced earlier.
+Suppose we still have
+\small
+\begin{verbatim}
+Range x = new BlockRange(100, p.dim(0)) ;
+\end{verbatim}
+\normalsize
+and the process group defined in figure \ref{fig:group}, then
+\small
+\begin{verbatim}
+on(q) 
+  float [[ ]] a = new float [[x]];
+\end{verbatim}
+\normalsize
+will create a global array with range \texttt{y} on group \texttt{q}.
+Here \texttt{a} is a descriptor handle describing a one-dimensional
+array of \texttt{float}. It is block distributed on group
+\texttt{q}\footnote{The \texttt{on} clause restrict the data owner
+group of the array to \texttt{q}. If group \texttt{p} is used instead,
+the one dimenstion array will be replicated in the first dimenstion of
+the group, and block distributed over the second dimension.}.  In
+HPJava term, \texttt{a} is also called a \emph{global or distributed
+array reference}.
+
+A distributed array range can also be \emph{collapsed} (or
+\emph{sequential}).  An integer range is specified, eg
+\small
+\begin{verbatim}
+on(p)
+  float [[*]] b = new float [[100]];
+\end{verbatim}
+\normalsize
+When defining an array with collapsed dimensions, \texttt{*} can
+optionally be added in a type signatures to mark these dimensions.
+
+The typical method of accessing global array elements is not exactly
+the same as for local array elements, or for global scalar references.
+Since global arrays may have position information in their
+dimensions, we often use locations as their subscripts:
+\small
+\begin{verbatim}
+Location i=x[3];
+at(i)
+  a[i]=3;
+\end{verbatim}
+\normalsize
+Here the fourth element of array \texttt{a} is assigned the value 3.
+We will leave discussion of the \texttt{at} construct to section
+\ref{control}, and give a simpler example here:
+if a global array is defined with a collapsed dimension, accessing
+its elements can be modelled on local arrays.  For example:
+\small
+\begin{verbatim}
+for(int i=0; i<100; i++)
+  b[i]=i;
+\end{verbatim}
+\normalsize
+assigns the loop index to each corresponding element in the array.
+
+When defining a multi-dimensional global array, a single descriptor
+parametrizes a rectangular array of any dimensions.
+\small
+\begin{verbatim}
+Range x = new BlockRange(100, p.dim(0)) ;  
+Range y = new CyclicRange(100, p.dim(1)) ;
+float [[,]] c = new float [[x, y]];
+\end{verbatim}
+\normalsize
+This creates a two-dimension global array with the first dimension
+block distributed and the second cyclic distributed.  Now \texttt{c} is a
+global array reference.  Its elements can be accessed using
+single brackets with two suitable locations inside.
+
+The global array introduced here is a Fortran-style multi-dimensional
+array, {\em not} a Java-like array-of-arrays.
+%Hence the memory for the multi-dimension array is a continuous block,
+%different from Java's memory scheme for arrays.
+Java-style arrays-of-arrays are still useful. For example, one can
+define a local array of distributed arrays:
+\small
+\begin{verbatim}
+int[] size = {100, 200, 400};
+float [[,]] d[] = 
+        new float [size.length][[,]] ;
+Range x[];
+Range y[];
+for (int l = 0; l < size.length; l++) {
+  const int n = size [l] ;
+  x[l] = new BlockRange(n, p.dim(0)) ;  
+  y[l] = new BlockRange(n, p.dim(1)) ;  
+  d[l] = new float [[x[l], y[l]]];
+}
+\end{verbatim}
+\normalsize
+creates an array shown in figure \ref{fig:layer}.
+
+\begin{figure}[htbp]
+  \begin{center}
+    \leavevmode
+%    \putfig{layer.eps}{1.00}
+    \psfig{figure=layer.eps}
+    \caption{Array of distributed array}
+    \label{fig:layer}
+  \end{center}
+\end{figure}
+
+\paragraph{Array sections and type signatures.}
+
+HPJava allows to construct {\em sections} of global arrays.  The syntax
+of section subscripting uses double brackets.  The subscripts can be
+scalar (integers or locations) or triplets.
+
+Suppose we still have array \texttt{a} and \texttt{c} defined as
+above, then, \texttt{a[[i]]}, \texttt{c}, \texttt{c[[i, 1::2]]},
+and \texttt{c[[i, :]]} are all array sections.  Here {\tt i} is a
+location in the first range of {\tt a} and {\tt c} (it could also
+be an integer in the appropriate interval).
+Both the expressions \texttt{c[[i, 1::2]]} and \texttt{c[[i, :]]}
+represent one-dimensional distributed arrays, providing aliases for
+subsets of the elements in \texttt{c}.  The expression \texttt{a[[i]]}
+contains a single element of \texttt{a}, but the result is a global
+scalar reference (unlike the expression \texttt{a[i]} which is a simple
+variable).
+
+Array section expressions are often used as arguments in function
+calls\footnote{When used in method calls, the collapsed dimension
+array is a \emph{subtype} of the ordinary one. i.e. an argument of
+\texttt{float[[*,*]]}, \texttt{float[[*,]]} and \texttt{float[[,*]]}
+type can all be passed to a dummy of type \texttt{float[[,]]}.
+The converse is not true.}.  Table \ref{tab:section} shows the type
+signatures of global data with different dimensions.
+\begin{table}[htbp]
+  \begin{center}
+    \leavevmode
+    \small
+    \begin{tabular}[c]{l|ll} 
+      \textbf{global var}& \textbf{array section} & \textbf{type} \\ 
+      \hline
+      2-dimension & \texttt{c} & \\
+      & \texttt{c[[:,:]]} & \texttt{float [[,]]} \\ 
+      \hline
+      1-dimension & \texttt{c[[i,:]]} & \\
+      & \texttt{c[[i,1::2]]} & \texttt{float [[ ]]} \\ 
+      \hline
+      scalar(0-dim) & \texttt{c[[i,j]]} & \texttt{float \#} \\ 
+      \hline
+    \end{tabular}
+    \normalsize
+    \caption{Section expression and type signature}
+    \label{tab:section}
+  \end{center}
+\end{table}
+In the table, both \texttt{i} and \texttt{j} are location
+references.
+
+\paragraph{Inquiry fields and functions}
+
+The size of an array in Java can be had from its
+\texttt{length} field.  Similarly, in HPJava, information like data
+owner group and distributed dimensions can be accessed from the
+following fields,
+\small
+\begin{verbatim}
+Group group;   //data owner group
+Range range[]; //dimension array
+\end{verbatim}
+\normalsize
+Further inquiry functions on {\tt Range} yield values such as
+extents and distribution formats.
+
+%For an array with collapsed dimensions, collapsed ranges will be
+%created for the corresponding dimensions.
+
+\subsection{Program execution control}
+\label{control}
+
+HPJava has all the Java statements for execution control
+within a single process.  It introduces three new control
+constructs, \texttt{on}, \texttt{at} and \texttt{overall} for execution
+control across processes.
+A new concept, the \emph{active process group}, is introduced. It is the
+set of processes sharing the current thread of control.
+
+In a traditional SPMD program, switching the active
+process group is effectively implemented by \texttt{if} statements
+such as:
+\small
+\begin{verbatim}
+if(myid>=0 && myid<4) {
+  ...
+}
+\end{verbatim}
+\normalsize
+Inside the braces, only processes numbered 0 to 3
+share the control thread.
+In HPJava, this effect is expressed using a \texttt{Group}.
+When a HPJava program starts, the active process group has a
+system-defined value.  During the execution, the active process group
+can be changed explicitly through an \texttt{on} construct in the
+program.
+
+In a shared memory program, accessing the value of a variable is
+straightforward. In a message passing system, only the process which
+holds data can read and write the data.  We sometimes call this {\em
+SPMD constraint}.  A traditional SPMD program respects this constraint
+by using an idiom like
+\small
+\begin{verbatim}
+if(myid==1) 
+  my_data=3;
+\end{verbatim}
+\normalsize
+The \texttt{if} statement makes sure that only \texttt{my\_data}
+on process 1 is assigned to.
+
+In the language we present here similar constraints must be respected.
+Besides \texttt{on} construct introduced earlier, there is a
+convenient way to change the active process group to access a required
+array element, namely \texttt{at} construct.
+Suppose array \texttt{a} is defined as in the previous section, then:
+\small
+\begin{verbatim}
+on (q) {
+  Location i=x[1];
+  at(i)
+    a[i]=3; //correct
+
+  a[i]=3;   //error
+}
+\end{verbatim}
+\normalsize
+The assignment statement guarded by an \texttt{at} construct is correct;
+the one without it may cause run-time error.
+
+A more powerful construct called \texttt{overall}
+combines switching of the active process group with a loop:
+\small
+\begin{verbatim}
+on(q)
+  overall(i= x|0:3)
+    a[i]=3;
+\end{verbatim}
+\normalsize
+is essentially equivalent to\footnote{A compiler can implement
+\texttt{overall} construct in a more efficient way, using linearized
+address calculation. For detail definition on \texttt{overall}
+construct, please refer to \cite{Car98}}
+\small
+\begin{verbatim}
+on(q) 
+  for(int n=0;n<4;n++)
+    at(i=x[n])
+      a[i]=3;
+\end{verbatim}
+\normalsize
+In each iteration, the active process group is changed to
+\texttt{q/i}.
+In section \ref{examples}, we will illustrate with further programs how
+\texttt{at} and \texttt{overall} constructs conveniently allow one to
+keep the active process group equal to the data owner group for the
+assigned data.
+
+\subsection{Communication library functions}
+\label{communication}
+
+When accessing data on another process, HPJava needs explicit
+communication, as in a ordinary SPMD program. 
+Communication libraries are provided as packages in HPJava. Detailed
+function specifications will be introduced in other papers. Here we
+will only introduce a small number of top level collective
+communication functions.
+
+In the current design, the collective communications are member
+functions of a static class \texttt{Adlib}.
+\texttt{Adlib.remap} will copy the corresponding element from one to
+another, regardless of their distribution format. \texttt{Adlib.shift}
+will shift certain amount in a specific dimension of the array in
+either cyclic or edge-off mode. \texttt{Adlib.writeHalo} is used to
+support ghost regions.
+
+It is possible to integrate other communication library as
+communication packages of the language.  We have already implemented
+a Java MPI interface. Currently CHAOS \cite{Das94} and GA \cite{Nie96}
+are being considered as ``add-on'' packages.
+

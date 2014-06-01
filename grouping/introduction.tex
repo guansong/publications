@@ -1,0 +1,79 @@
+\section{Introduction}
+\label{introduction}
+
+As several research papers pointed out, OpenMP 
+%\cite{Ope00} \cite{Ope02}
+\cite{Ope05} is due to an update \cite{Gon00}, \cite{Cha05}. The set of
+features in the existing specification of the API provides essential
+functionality that were mostly selected from previous shared memory parallel
+APIs. Recently, the shared memory architectures have interesting developments,
+from multi-core processors to hyperthread and SMT, from accelerate boards to
+CELL broadband Engine\cite{Cel05}. The emerging architectures force us to
+explore new features for the OpenMP standard. 
+
+%Several proposals have already
+%start the work\cite{Cha05}.
+
+\begin{figure}[h!]
+  \begin{center}
+    \includegraphics[angle=0, width=0.45\textwidth]{arches.eps}
+    \caption{\footnotesize Emerging architectures}
+    \label{fig:arches}
+  \end{center}
+\end{figure}
+
+Figure \ref{fig:arches} is an example of an extreme case of the latest development
+of shared memory architectures. The picture includes dual core CPUs,
+hyperthreads or SMT processors. Although the system is not modeled on any real
+machine~\footnote{Circle \emph{a} and \emph{b} may represent two different
+computers, or they are combined together to create an even more complicated
+structure. This is purely imaginary. We used the figure just to illustrate the
+complexity of the problem.}, it can illustrate the potential problems a
+programmer may face in the real world.
+
+Programming on such complicated systems is going to require difficult
+compromise. The following items are elements that an ideal solution framework
+should address, quoted directly from OpenMP language committee discussion:
+
+\begin{itemize}
+
+  \item \emph{Modularity}: Modern software engineering makes heavy use of
+  modular software.  OpenMP's existing model, however, does not support
+  compartmentalization of parallelism.  For example, MPI defines a
+  communicator.  This can be passed to a library and the library is then
+  restricted to the constraints defined by that communicator.  Furthermore, the
+  library developer can rename the communicator so the interactions between
+  components of the library are not exposed outside the library. 
+  %We have no way to do this in OpenMP.
+
+  \item \emph{Multi-level machines}: Shared memory machines will become
+  increasingly hierarchical.  The combination of SMT and NUMA all come together
+  to create a nightmare for the existing ``flat earth'' model of OpenMP. The
+  scalar \texttt{OMP\_NUM\_THREADS} has to expand to encompass a multi-level
+  abstraction of some kind. 
+
+  \item \emph{Mapping OpenMP threads onto processors}: Different machines will
+  have different hierarchies of processors.  A program must be able to query
+  the system about the processor hierarchy and then adapt to it  by controlling
+  how the OpenMP threads map onto processors.
+
+  \item \emph{Worksharing between subteams}: To broaden the range of
+  applications appropriate for OpenMP, we need to extend OpenMP so programmers
+  can specify worksharing restricted to subteams.  
+
+\end{itemize}
+
+This is a very ambitious goal. We are not sure if such a solution exist to fit
+all the requirements. Even if it does exist, the impact could be so large as to
+make all the previous OpenMP programs obsolete; or make the implementation of
+the standard so difficult that the drawbacks outweight the advantage it brings
+to the standard.
+
+In this paper we will describe our attempt to solve this problem. It may not be
+the answer we are looking for, a lot of things need to be further improved.
+
+To avoid a dramatic change in
+the OpenMP standard, we propose an incremental approach, to consider
+\emph{thread mapping} as the first step and address the bigger issue in the
+second step. We will discuss these topics in the following sections.
+

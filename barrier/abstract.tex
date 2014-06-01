@@ -1,0 +1,25 @@
+% abstract.tex
+
+\begin{abstract}
+  Barrier synchronization is an important and performance critical
+  primitive in many parallel programming models, including the popular
+  OpenMP model.  In this paper, we compare the performance of several
+  software implementations of barrier synchronization and introduce a
+  new implementation, \emph{distributed counters with local sensor},
+  which considerably reduces overhead on POWER3 and POWER4 SMP
+  systems.  Through experiments with the EPCC OpenMP benchmark, we
+  demonstrate a 79\% reduction in overhead on a 32-way POWER4 system
+  and an 87\% reduction in overhead on a 16-way POWER3 system when
+  comparing with a fetch-and-add implementation.  Since these
+  improvements are primarily attributed to reduced L2 and L3 cache
+  misses, we expect the relative performance of our implementation to
+  increase with the number of processors in an SMP and as memory
+  latencies lengthen relative to cache latencies.
+
+  \vspace{0.5cm}
+
+  \textbf{Keywords. } barrier, synchronization, multiprocessor,
+  distributed counter
+\end{abstract}
+
+

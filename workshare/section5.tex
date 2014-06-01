@@ -1,0 +1,29 @@
+%\newpage
+
+\section{Summary and future work}
+
+
+In this paper, we listed important data structures needed in our
+runtime library to support workshares in OpenMP standard, and the
+corresponding algorithms to reduce the runtime overhead.
+
+We explained that by carefully choosing the length of the workshare
+control block queue, and reusing the queue whenever a barrier
+synchronization occurred, we do not need to map control block
+structures to memory for each workshare instance.  Also by preparing
+the next workshare control block in advance, we do not need a separate
+locking phase to initialize a control block, neither do we need to
+initialize the whole queue at startup, which saves the parallel
+region overhead for most of the real application cases. Although these
+are just ``small techniques'', they do have significant impact on
+performance benchmarks for runtime libraries.
+
+We also introduced our view on OpenMP workshare, and algorithms to
+implement barrier synchronization, which was considered as a special case of the
+workshare. All these are commercial available in our XL Fortran and
+VisualAge\textregistered\  C/C++ compilers. We are actually further improving the
+barrier performance by taking advantage of more accurate cacheline
+alignment of our internal data structures.
+
+
+% how about irregular

@@ -1,0 +1,64 @@
+%\documentclass[twocolumn, 10pt]{article}
+%\documentclass{article}
+
+\documentclass{llncs}
+
+%\setlength{\textheight}{9.0in}
+%\setlength{\textwidth}{6.5in}             %%%% Preset settings
+%\setlength{\columnsep}{0.375in}
+%\setlength{\oddsidemargin}{0.0in}
+%\setlength{\topmargin}{0.0in}
+
+%\setlength{\headheight}{0.0in}
+%\setlength{\headsep}{0.0in}
+%\setlength{\parindent}{1pc}
+
+\usepackage[pagewise,switch]{lineno}       % For line number
+\linenumbers
+
+\usepackage{alltt}                         % For program with subscript
+%\usepackage[mathcal]{euscript}             % For special math symbol
+
+\usepackage{graphicx}                      % For EPS figure
+\usepackage{times}                         % For PDF font
+
+%\usepackage{hyperref}                      % For hyper link, should be the last one 
+
+\usepackage[ruled, vlined]{algorithm2e}    % For algorithm, 
+                                           % it seems a bug make it has to be here
+
+%\usepackage{psfig}                        % For old PS figure
+
+%\pagestyle{empty}                         %%%% No page Numbering
+\pagestyle{plain}                         
+
+%------------------------------------------------------------------------- 
+%------------------------------------------------------------------------- 
+
+\begin{document}
+
+%--------------------
+
+\input{title}
+\input{abstract}
+
+%--------------------
+
+\input{introduction}
+\input{section1}
+\input{section2}
+\input{summary}
+\input{epilog}
+
+
+%--------------------
+
+\bibliographystyle{unsrt}
+\bibliography{group}
+
+%--------------------
+
+\end{document}
+
+%------------------------------------------------------------------------- 
+%------------------------------------------------------------------------- 

@@ -1,0 +1,85 @@
+% Root File for Prentice-Hall Book
+%         10 point version
+%
+% Prepared for LaTeX2e February, 1997
+%   Derived from LaTeX 2.09 version
+
+%\documentclass[twoside]{phstyle}
+\documentclass[twoside]{phstyle}
+\usepackage{graphics} 
+\usepackage{epsfig}
+
+%\usepackage{chapterbib}
+%% Preamble:
+
+% Load any macro files needed for this book:
+
+%\input table
+%\input mydefs
+%\input setps
+
+% New commands and/or command redefinitions
+%
+% You can also place such commands in a macro file (e.g. mydefs.tex)
+% and load them in the preamble with "input mydefs"
+% Here are some examples:
+
+\newcommand{\be}{\begin{equation}}           %---- begin numbered equation
+\newcommand{\ee}{\end{equation}}             %---- end numbered equation
+\newcommand{\dst}{\everymath{\displaystyle}} %---- use displaystle in eqs.
+\newcommand{\Nuclide}[2]{${}^{#2}$#1}        %---- Nuclide macro
+\renewcommand{\SS}[1]{${}^{#1}$}             %---- superscript in text
+\newcommand{\STRUT}{\rule{0in}{3ex}}         %--- small strut
+\newcommand{\dotprod}{{\scriptscriptstyle \stackrel{\bullet}{{}}}}
+
+\makeindex
+
+
+%% Document Parts
+
+% Files for this run:
+%\includeonly{cover,preface,ch1,ch2,ch3,ch4,ch5} % for whole book
+%\includeonly{cover,preface,ch1,jim,schikuta}              % for this example book
+%for book:
+%\includeonly{preface}                       % for part of book
+
+%%% Document Portion:
+
+\begin{document}
+
+%% Front Matter:
+\pagenumbering{roman}             % Roman numbering
+%BOOOK: \include{cover}                   % Dummy cover --  PH makes real cover
+% --- Table of Contents ---
+%for book:
+%BOOK: \setcounter{page}{5}              % Starting page number (specified by PH)
+%for your chapter
+\setcounter{page}{1}              % Starting page number (specified by PH)
+                                  % This should be page 7 if there is a 
+                                  % dedication page...
+\parskip .5ex                     % Add space between Contents items
+\tableofcontents                  % Make Contents (comment out if not wanted)
+\cleardoublepage                  % Add blank even-num page if necessary
+\parskip 0in                      % Reset to zero interpar spacing
+% --- Preface (if any) ---: for BOOOK
+%BOOK: \include{preface}                 % Add Preface (if any)
+%BOOK: \cleardoublepage                  % Add blank even-num page if necessary
+
+%% Main Text:
+\pagenumbering{arabic}            % Arabic numbering
+
+%----> In place of toni: write your file name
+\include{zgs}
+
+%\include{ch1}
+%\include{ch2}
+%\include{ch2}                    % This sample document has only one chapter,
+%\include{ch3}                    % so other chapter files are commented out. 
+%\include{ch4}                    % Uncomment as you add chapters/appendices
+%\appendix                        % Change to appendix numbering
+%\include{appa}
+%\include{appb}
+
+\printindex 
+
+\end{document}

@@ -1,0 +1,80 @@
+\section{Introduction}
+\label{introduction}
+
+Automatic parallelization or auto-parallelization involves
+automatically identifying and translating serial program code into
+equivalent parallel code to be executed by multiple threads. Both
+OpenMP parallelization and auto-parallelization try to exploit the
+benefits of shared memory, multiprocessor systems. But the main
+difference between OpenMP and auto-parallelization is that, for
+OpenMP, the user has complete knowledge of the program behavior and is
+aware of all the code segments that can benefit from parallelization.
+For auto-parallelization, however, the challenge is to pick the right parallelizable code from the limited information available within the compiler without any modification to the original source program.
+
+\subsection{Motivation}
+
+It is widely accepted that automatic parallelization is difficult and
+less efficient than explicit parallel programming. For years, people
+have been seeking better parallel programming models that can
+expressively describe the parallelism in an application. The existing
+models include, just to name a few, HPF\cite{Koe93}, MPI\cite{Pac96},
+OpenMP\cite{Cha01}, UPC\cite{ElG03}, etc. It is also a known fact that
+parallel programming is difficult. No matter what kind of parallel
+programming model is used, creating efficient, scalable parallel code
+still requires a significant degree of expertise. Parallelization
+tools can be used as an expert system to help users to find potential
+parallelizable code. However, to use the tools effectively,
+an understanding of dependence analysis and the application code is still needed.
+
+On the other hand, more and more multi-thread and multi-core chips are
+becoming available in the market and parallel programming is no longer
+a privilege available only for high-performance computing. If not now,
+in the near future, parallel architecture will be a common feature in
+\emph{desktop} and even \emph{laptop computing}. Keeping this growing
+trend in mind, auto-parallelization looks like an irresistible option.
+Auto-parallelization relieves the user from having to analyze and
+modify the source program with explicit compiler directives. The user
+is shielded from low-level details of iteration space partitioning,
+data sharing, thread scheduling and synchronization.
+Auto-parallelization also saves the user the burden of ensuring
+correct parallel execution.
+
+However, providing compiler support for automatic parallelization is
+not easy or straightforward. The biggest critique is that the
+resultant performance gain is typically limited, particularly in terms of
+scalability. In addition, accurate analysis can be restricted by the
+time constraints a compiler must meet for commercial acceptability,
+where in-depth analysis may be sacrificed to allow rapid operation.
+Taking these factors into account, we believe that using
+auto-parallelization is still justified by the following
+considerations:
+
+\begin{itemize}
+\item For parallel machines with a small number of node processors,
+  scalability is not a big concern. While auto-parallelization may not
+  give us the speedup that a massively parallel processing (MPP) application can achieve, it can
+  still be used to take advantage of the extra silicon available.
+\item Even an MPP machine is most likely
+  multi-layered where each node is a tightly coupled SMP machine, as in a
+  cluster. Explicit message passing parallel programs, such as MPI, will
+  still benefit from a nested automatic parallel execution.
+\item Most of the time-consuming applications are data parallel
+  applications. With the growing problem size outpacing the improvements in hardware, data parallel applications can benefit from simple parallelization techniques. 
+\item As more and more desktop parallel machines are available, users
+  will be willing to try a parallel approach to solve their
+  computational problems, if only for a small speedup as long as the
+  effort to achieve that is reasonable.
+\item As hardware performance keeps improving, more complicated
+  analysis will be tolerable in the compilation process.
+\end{itemize}
+
+\subsection{Organization of the paper}
+The rest of the paper is organized as follows. In Section
+\ref{par_structure} we introduce our existing compilation and runtime
+environment and also briefly describe the structure of the auto-parallelizer. Section \ref{selection} and \ref{cost} describes in
+detail some optimization techniques used by the parallelizer to
+enhance the parallel performance of the application code.  Section
+\ref{opportunities} looks at a few challenging parallelization cases
+that we encountered during the course of our work.  Finally, in Section
+\ref{summary} we summarize our results and future work.
+

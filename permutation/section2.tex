@@ -1,0 +1,18 @@
+\section{Summary of Invention} 
+
+In this note, we further improve a loop permutation algorithm to
+balance data locality and coarse-grained parallelism in an SMP
+environment.
+
+Based on the concept of dependence vectors, we define a multiply
+operation in the dependence vector matrix, and prove that under
+certain conditions a loop can be permuted to an outer level and still
+be parallelizable. Using this condition we add another pass in the
+loop selection algorithm for locality to explore coarse-grained
+parallelism.
+
+We will see that by carefully choosing the heuristics, we can greatly
+improve the performance of an auto-parallelized program. For a typical
+test, we reduce more than 50\% execution time on a POWER4 system.
+
+

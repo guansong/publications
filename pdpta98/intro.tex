@@ -1,0 +1,68 @@
+% intro.tex
+
+\section{Introduction}
+
+In this report, we introduce \emph{HPJava} language, a programming
+language extended from Java for parallel programming on message
+passing systems, from multiprocessor systems to workstation clusters.
+
+Although it has a close relationship with HPF\cite{HPF96}, the design
+of HPJava does not follow HPF directly.  Instead it introduces a high
+level structured SPMD programming style, \emph{HPspmd}, which can be
+summarized as follows:
+\begin{itemize}
+\item \textbf{Structured SPMD programming.} Programs written in the
+  programming language presented here explicitly coordinate a
+  well-organized process group. As in a conventional
+  distributed-memory SPMD program, only a process owning a data item
+  is allowed to access the item directly.  The language provides
+  special constructs that allow programmers to meet this constraint
+  conveniently.
+  
+\item \textbf{Global name space.} Besides the normal local variables of
+  the sequential base language, the language provides classes of
+  variables accompanied by non-trivial \emph{data descriptors},
+  providing a global name space in the form of globally subscripted
+  arrays, with assorted distributed patterns. This helps to relieve
+  programmers of error-prone activities such as the local-to-global,
+  global-to-local address translations which occur in data parallel
+  applications.
+  
+\item \textbf{Hybrid of data and task parallel programming.} The
+  language also provides special constructs to facilitate both data
+  parallel and task parallel programming. Through language constructs,
+  different processors can either simultaneously work on global
+  addressed data, or independently execute complex procedures on their
+  own local data. The conversion between these phases is seamless.
+  
+\item \textbf{Communication libraries.} In the traditional SPMD model,
+  the language itself does not provide implicit data movement
+  semantics. Different communication patterns are implemented as
+  library functions. This greatly simplifies the task of the compiler,
+  and should encourage programmers to use algorithms that exploit
+  locality. Data on remote processors are accessed exclusively through
+  explicit library calls. In particular, the initial HPJava
+  implementation relies on a library of powerful collective
+  communication routines. Other distributed-array oriented
+  communication libraries may be bound to the language later. The low
+  level MPI communication is always available as a fall-back. Since
+  the language itself only provides basic concepts to organize data
+  arrays and process groups, it allows the possibility that when a new
+  communication pattern is needed, it should be relatively easy to
+  integrate through new libraries.
+
+\end{itemize}
+In our earlier work on HPF compilation \cite{Zha97} the role of runtime
+support was emphasized.  Difficulties in compiling HPF efficiently
+suggested to make the runtime communication library directly visible in
+the programming model.  Since Java language is simple, elegant language,
+we implemented our prototype based upon this language.
+
+%The reason for not following HPF directly is that during the practice of
+%compiling HPF\cite{Zha97}, the idea of ``runtime supporting'' is
+%emphasized in our approach, and we found the level of runtime system
+%can be effectively raised to a programming language model. In fact,
+%the new programming style introduced is language independent. It also
+%can be binded with other programming languages such as C/C++ and
+%Fortran.
+

@@ -1,0 +1,1019 @@
+
+\documentstyle[psfig]{llncs}
+%\documentstyle[psfig]{article}
+
+\begin{document}
+
+\bibliographystyle{plain}
+
+\title{Considerations in HPJava language design and implementation}
+
+\author{Guansong Zhang, Bryan Carpenter, Geoffrey Fox\\
+       Xinying Li and Yuhong Wen}
+
+\institute{NPAC at Syracuse University \\
+           Syracuse, New York, \\
+           NY 13244, USA \\
+           \{zgs,dbc,gcf,xli,wen\}@npac.syr.edu}
+
+\date{October 19, 1998}
+
+\maketitle
+
+\begin{abstract}
+This paper discusses some design and implementation issues in
+the \emph{HPJava} language.  The language is briefly reviewed, then the
+class library that forms the foundation of the translation scheme is
+described.  Through example codes, we illustrate how HPJava source
+codes can be translated straightforwardly to ordinary SPMD Java
+programs calling this library.  This is followed by a discussion of
+the rationale for introducing the language in the first place, and of
+how various language features have been designed to facilitate
+efficient implementation.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:introduction}
+
+\emph{HPJava} is a programming language extended from Java to support
+parallel programming, especially (but not exclusively) data parallel
+programming on message passing and distributed memory systems, from
+multi-processor systems to workstation clusters.
+
+Although it has a close relationship with HPF \cite{HPFStandard}, the design
+of HPJava does not inherit the HPF programming model.  Instead the
+language introduces a high-level structured SPMD programming
+style---the \emph{HPspmd} model.  A program written in this kind of
+language explicitly coordinates well-defined process groups.  These
+cooperate in a loosely synchronous manner, sharing logical threads of
+control.  As in a conventional distributed-memory SPMD program, only a
+process owning a data item such as an array element is allowed to
+access the item directly.  The language provides special constructs
+that allow programmers to meet this constraint conveniently.
+
+Besides the normal variables of the sequential base language, the
+language model introduces classes of global variables that are stored
+collectively across process groups.  Primarily, these are {\em
+distributed arrays}.  They provide a global name space in the form of
+globally subscripted arrays, with assorted distribution patterns.  This
+helps to relieve programmers of error-prone activities such as the
+local-to-global, global-to-local subscript translations which occur in
+data parallel applications.
+
+In addition to special data types the language provides special
+constructs to facilitate both data parallel and task parallel
+programming.  Through these constructs, different processors can either
+work simultaneously on globally addressed data, or independently execute
+complex procedures on locally held data.  The conversion between these
+phases is seamless.
+
+In the traditional SPMD mold, the language itself does not provide
+implicit data movement semantics.  This greatly simplifies the task of
+the compiler, and should encourage programmers to use algorithms that
+exploit locality.  Data on remote processors is accessed exclusively
+through explicit library calls.  In particular, the initial HPJava
+implementation relies on a library of collective communication
+routines originally developed as part of an HPF runtime library.
+Other distributed-array-oriented communication libraries may be
+bound to the language later.  Due to the explicit SPMD programming
+model, low level MPI communication is always available as a fall-back.
+The language itself only provides basic concepts to organize data
+arrays and process groups.  Different communication patterns are
+implemented as library functions.  This allows the possibility that if
+a new communication pattern is needed, it is relatively easily
+integrated through new libraries.
+
+The preceding paragraphs attempt to characterize a language independent
+programming style.  This report only briefly sketches the HPJava
+language.  For further details, please refer to \cite{JavaAd, High_Level_SPMD}.
+Here we will discuss in more depth some issues in the language design
+and implementation.  With the pros and cons explained, the language can
+be better understood and appreciated.
+
+Since it is easier to comment on the language design with some
+knowledge of its implementation, this document is organized as follows:
+section \ref{sec:overview} briefly reviews the HPJava language extensions;
+section \ref{sec:scheme} outlines a simple but complete implementation
+scheme for the language; section \ref{sec:consideration} explains the
+language design issues based on its implementation; finally, the
+expected performance and test results are given.
+
+\section{Overview of HPJava\label{sec:overview}}
+
+Java already provides parallelism through threads.  But that model of
+parallelism can only be easily exploited on shared memory computers.
+HPJava is targetted at distributed memory parallel computers (most
+likely, networks of PCs and workstations).
+
+HPJava extends Java with class libraries and some additional syntax for
+dealing with {\em distributed arrays}.  Some or all of the dimensions
+of a these arrays can be declared as {\em distributed ranges}.  A
+distributed range defines a range of integer subscripts, and specifies
+how they are mapped into a process grid dimension.  It is represented
+by an object of base class {\tt Range}.
+Process grids---equivalent to processor arrangements in HPF---are
+described by suitable classes.  A base class {\tt Group} describes a
+general group of processes and has subclasses {\tt Procs1}, {\tt
+Procs2}, \ldots, representing one-dimensional process grids,
+two-dimen\-sional process grids, and so on.  The inquiry function {\tt
+dim} returns an object describing a particular dimension of a grid.
+In the example
+\small
+\begin{verbatim}
+  Procs2 p = new Procs2(3, 2) ;
+
+  Range x = new BlockRange(100, p.dim(0)) ;
+  Range y = new BlockRange(200, p.dim(1)) ;
+
+  float [[,]] a = new float [[x, y]] on p ;
+\end{verbatim}
+\normalsize
+{\tt a} is created as a 100 $\times$ 200 array,
+block-distributed over the 6 processes in {\tt p}.
+The {\tt Range} subclass {\tt BlockRange} describes a simple
+block-distributed range of subscripts---analogous to {\tt BLOCK}
+distribution format in HPF.  The arguments of the {\tt BlockRange}
+constructor are the extent of the range and an object
+defining the process grid dimension over which the range is
+distributed.
+
+In HPJava the type-signatures and constructors of distributed arrays
+use double brackets to distinguish them from ordinary Java arrays.
+Selected dimensions of a distributed array may have a collapsed
+(sequential) ranges rather than a distributed ranges: the corresponding
+slots in the type signature of the array should include a {\tt *}
+symbol.  In general the constructor of the distributed array is
+followed by an {\tt on} clause, specifying the process group over which
+the array is distributed.  (If this is omitted the group defaults to the
+APG, see below.)  Distributed ranges of the array must be distributed
+over distinct dimensions of this group.
+
+A standard library, {\em Adlib}, provides functions for manipulating
+distributed arrays, including functions closely analogous to the array
+transformational intrinsic functions of Fortran 90.  For example:
+\small
+\begin{verbatim}
+  float [[,]] b = new float [[x, y]] on p ;
+  Adlib.shift(b, a, -1, 0, CYCL) ;
+
+  float g = Adlib.sum(b) ;
+\end{verbatim}
+\normalsize
+The {\tt shift} operation with shift-mode {\tt CYCL} executes a cyclic
+shift on the data in its second argument, copying the result to its
+first argument.  The {\tt sum} operation simply adds all elements of
+its argument array.
+In general these functions imply inter-processor communication.
+
+Often in SPMD programming it is necessary to restrict execution
+of a block of code to processors in a particular group {\tt p}.
+Our language provides a short way of writing this construct
+\small
+\begin{verbatim}
+  on(p) {
+    ...
+  }
+\end{verbatim}
+\normalsize
+The language incorporates a formal idea of an active process group
+(APG).  At any point of execution some group is singled out as
+the APG.  An {\tt on(p)} construct specifically changes its value
+to {\tt p}.  On exit from the construct, the APG is restored to
+its value on entry.
+
+Subscripting operations on distributed arrays are subject to some
+restrictions that ensure data accesses are local.  An array access such as
+\small
+\begin{verbatim}
+  a [17, 23] = 13 ;
+\end{verbatim}
+\normalsize
+is forbidden because typical processes do not hold the specified element.
+The idea of a {\em location} is introduced.  A location can be viewed
+as an abstract element, or ``slot'', of a distributed range.
+The syntax {\tt x\,[n]} stands for location {\tt n} in range {\tt x}.
+In simple array subscripting operations, distributed dimensions of
+arrays can only be subscripted using locations (not integer
+subscripts).  These must be locations in the appropriate range of the
+array.  Moreover, locations appearing in simple subscripting operations
+must be {\em named locations}, and named locations can only be scoped
+by {\em at} and {\em overall} constructs.
+
+The {\em at} construct is analogous to {\em on}, except that its
+body is executed only on processes that hold the specified location.
+The array access above can be safely written as:
+\small
+\begin{verbatim}
+  at(i = x [17])
+    at(j = y [23])
+      a [i, j] = 13 ;
+\end{verbatim}
+\normalsize
+Any location is mapped to a particular slice of a process grid.  
+The body of the {\em at} construct only executes on processes that
+hold the location specified in its header.
+
+The last {\em distributed control} construct in the language
+is called {\em overall}.  It implements a distributed parallel loop,
+and is parametrized by a range.  Like {\em at}, the header of this
+construct scopes a named location.  In this case the location can
+be regarded as a parallel loop index.
+\small
+\begin{verbatim}
+  float [[,]] a = new float [[x, y]], b = new float [[x, y]] ;
+
+  overall(i = x)
+    overall(j = y)
+      a [i, j] = 2 * b [i, j] ;
+\end{verbatim}
+\normalsize
+The body of an {\em overall} construct executes, conceptually in
+parallel, for every location in the range of its index.  An individual
+``iteration'' executes on just those processors holding the location
+associated with the iteration.  Because of the rules about use of
+subscripts, the body of an {\em overall} can usually only combine
+elements of arrays that have some simple alignment relation relative to
+one another.  The {\tt idx} member of {\tt Range} can be used in
+parallel updates to yield expressions that depend on global index
+values.
+
+Other important features of the language include Fortran-90-style
+regular array sections ({\em section construction} operations look
+similar to simple subscripting operations, but are distinguished by use
+of double brackets), an associated idea of {\em subranges}, and {\em
+subgroups}, which can be used to represent the restricted APG inside
+{\em at} and {\em overall} constructs.
+
+The language extensions are most directly targetted at data parallelism.
+But an HPJava program is implicitly an SPMD Java program, and task parallelism
+is available by default.  A structured way to write a task parallel
+program is to write an overall construct parametrized by a process
+dimension (which is a particular kind of range).  The body of the loop
+executes once in each process.  The body can execute one or more ``tasks''
+of arbitrary complexity.  Task parallel programming with distributed
+arrays can be facilitated by extending the standard library with
+one-sided communication operations to access remote patches of the
+arrays, and we are investigating integration of software from the
+PNNL Global Array Toolset \cite{Global_Arrays} in this connection.
+
+\section{Translation scheme}
+\label{sec:scheme}
+
+The initial HPJava compiler is implemented as a source-to-source
+translator converting an HPJava program to a Java node program, with
+calls to runtime functions.  The runtime system is built on the NPAC
+PCRC runtime library \cite{NPAC_PCRC_kernel}, which has a kernel
+implemented in C++ and a Java interface implemented in Java and C++.
+
+\subsection{Java packages for HPspmd programming}
+\label{sec:package}
+
+The current runtime interface for HPJava is called \emph{adJava}.  It
+consists of two Java packages.  The first is the HPspmd runtime
+proper.  It includes the classes needed to translate language
+constructs.  The second package provides communication and some simple
+I/O functions.  These two packages will be outlined in this section.
+
+The classes in the first package include an environment class, distributed
+array ``container classes'', and related classes describing process groups
+and index ranges.
+The environment class {\tt SpmdEnv} provides functions to initialize and
+finalize the underlying communication library (currently MPI).
+Constructors call native functions to prepare the lower
+level communication package.  An important field, {\tt apg},
+defines the group of processes that is cooperating in ``loose
+synchrony'' at the current point of execution.
+
+The other classes in this package correspond directly to HPJava built-in
+classes.  The first hierarchy is based on \texttt{Group}.
+A {\em group}, or {\em process group}, defines some subset of the
+processes executing the SPMD program.  Groups have two important roles
+in HPJava.  First they are used to describe how program variables such as
+arrays are distributed or replicated across the process pool.  Secondly
+they are used to specify which subset of processes execute a particular
+code fragment.
+Important members of adJava {\tt Group} class include the pair
+{\tt on()}, {\tt no()} used to translate the {\em on} construct.
+\begin{figure}[htb]
+  \begin{center}
+    \leavevmode
+    \psfig{figure=procs.eps,width=2.2in} 
+    \caption{The HPJava {\tt Group} hierarchy}
+    \label{fig:procs}
+  \end{center}
+\end{figure}
+The most common way to create a group object is through
+the constructor for one of the subclasses representing a {\em process
+grid}.  The subclass
+\texttt{Procs} represents a grid of processes and carries
+information on process dimensions: in particular an inquiry function
+{\tt dim(r)} returns a range object describing the $r$-th process
+dimension.  {\tt Procs} is further subclassed by \texttt{Procs0},
+\texttt{Procs1}, \texttt{Procs2}, \ldots which  provide simpler
+constructors for fixed dimensionality process grids.
+The class hierarchy of groups and process grids is shown
+in figure \ref{fig:procs}.
+
+The second hierarchy in the package is based on \texttt{Range}.
+A {\em range} is a map from the integer interval $0,\ldots,n-1$ into
+some process dimension (ie, some dimension of a process grid).
+Ranges are used to parametrize distributed arrays and the
+{\em overall} distributed loop.
+\begin{figure}[htb]
+  \begin{center}
+    \leavevmode
+    \psfig{figure=ranges.eps,height=1.9in} 
+    \caption{The HPJava {\tt Range} hierarchy}
+    \label{fig:ranges}
+  \end{center}
+\end{figure}
+The most common way to create a range object is to use the constructor
+for one of the subclasses representing ranges with specific {\em
+distribution formats}.  The current class hierarchy is given in figure
+\ref{fig:ranges}.  Simple block distribution format is implemented by
+{\tt BlockRange}, while \texttt{CyclicRange} and \texttt{BlockCyclicRange}
+represent other standard distribution formats of HPF.  The subclass
+\texttt{CollapsedRange} represents a sequential (undistributed range).
+Finally, \texttt{DimRange} represents the range of coordinates of a
+process dimension itself---just one element is mapped to each process.
+
+The related adJava class \texttt{Location} represents an individual
+location in a particular distributed range.  Important members of the
+adJava {\tt Range} class include the function {\tt location(i)} which
+returns the $i$th location in a range and its inverse, {\tt idx(l)},
+which returns the global subscript associated with a given location.
+Important members of the {\tt Location} class include {\tt at()} and
+{\tt ta()}, used in the implementation of the HPJava that {\em at}
+construct.
+
+Finally in this package we have the rather complex hierarchy of classes
+representing distributed arrays.  HPJava global arrays declared using
+\texttt{[[~]]} are represented by Java objects belonging to classes
+such as:
+\begin{small}
+\begin{verbatim}
+   Array1dI, Array1cI,
+   Array2ddI, Array2dcI, Array2cdI, Array2ccI,
+   ...
+   Array1dF, Array1cF,
+   Array2ddF, Array2dcF, Array2cdF, Array2ccF,
+   ...
+\end{verbatim}
+\end{small}
+Generally speaking the class \texttt{Array}\textit{ndc{\ldots}T} represents
+$n$-dimensional distributed array with elements of type {\em T},
+currently one of {\tt I}, {\tt F}, \ldots, meaning {\tt int},
+{\tt float}, \ldots\footnote{In the inital implementation, the element type is
+restricted to the Java primitive types.}.
+The penultimate part of the class name is a string of
+$n$ ``c''s and ``d''s specifying whether each dimension is collapsed
+or distributed.  These correlate with presence or absence of an asterisk
+in slots of the HPJava type signature.
+The concrete {\tt Array\ldots} classes implement a series of abstract
+interfaces.  These follow a similar naming convention, but the root of
+their names is {\tt Section} rather than {\tt Array} (so {\tt Array2dcI},
+for example, implements {\tt Section2dcI}).  The hierarchy of
+{\tt Section} interfaces is illustrated in figure \ref{fig:arrays}.
+\begin{figure}[htb]
+  \begin{center}
+    \leavevmode
+    \psfig{figure=arrays.eps,height=2.8in} 
+    \caption{The adJava {\tt Section} hierarchy}
+    \label{fig:arrays}
+  \end{center}
+\end{figure}
+The need to introduce the {\tt Section} interfaces should be evident
+from the hierarchy diagram.  The type hierarchy of HPJava involves a
+kind of multiple inheritance.  The array type {\tt int [[*, *]]}, for
+example, is a specialization of {\em both} the types {\tt int [[*, ]]}
+and {\tt int [[, *]]}.  Java allows ``multiple inheritance'' only from
+interfaces, not classes.
+
+We will illustrate constructors of the {\tt Array} classes in later
+examples.  Here we mention some important members of the {\tt Section}
+interfaces.  The inquiry {\tt
+dat()} returns an ordinary one dimensional Java array used to store the
+locally held elements of the distributed array.  The member {\tt
+pos(i, ...)}, which takes $n$ arguments, returns the local offset of the
+element specified by its list of arguments.  Each argument is either a
+location (if the corresponding dimension is distributed) or an integer
+(if it is collapsed).  The inquiry {\tt grp()} returns the group over
+which elements of the array are distributed.  The inquiry {\tt rng(d)}
+returns the $d$th range of the array.
+
+The second package in adJava is the communication library.
+The adJava communication package includes classes corresponding to the
+various collective communication schedules provided in the NPAC PCRC
+kernel.  Most of them provide of a constructor to establish a schedule,
+and an \texttt{execute} method, which carries out the data movement
+specified by the schedule.  The communication schedules provided in
+this package are based on the NPAC runtime library.  Different
+communication models may eventually be added through further packages.
+
+The collective communication schedules can be used directly by
+the programmer or invoked through certain wrapper functions.
+A class named \texttt{Adlib} is defined
+with \texttt{static} members that create and execute
+communication schedules and perform simple I/O functions. 
+This class includes, for example, the following
+methods, each implemented by
+constructing the appropriate schedule and then executing it.
+\begin{small}
+\begin{verbatim}
+  static public void remap(Section dst, Section src)
+  static public void shift(Section dst, Section src,
+                           int shift, int dim, int mode)
+  static public void copy(Section dst, Section src)
+  static public void writeHalo(Section src,
+                               int[] wlo, int[] whi, int[] mode)
+\end{verbatim}
+\end{small}
+Use of these functions will be illustrated in later examples.
+Polymorphism is achieved by using arguments of class {\tt Section}.
+
+\subsection{Programming in the adJava interface}
+\label{sec:adJava}
+
+In this section we illustrate through an example---Fox's algorithm
+\cite{ProgrammingMPI} for matrix multiplication---how to program in the adJava
+interface.  We assume $A$ and $B$ are square matrices of order $n$, so
+$C=AB$ is also a square matrix of order $n$.  Fox's algorithm organizes
+$A$, $B$ and $C$ into sub-matrices on a $P$ by $P$ process array. It
+takes $P$ steps.  In each step, a sub-matrix of $A$ is broadcast across
+each row of the processes, a local block matrix product is computed,
+and array $B$ is shifted for computation in the next step.
+
+We can program this algorithm in HPJava, using \texttt{Adlib.remap}
+to broadcast submatrices, \texttt{Adlib.shift} to shift array $B$, and
+\texttt{Adlib.copy} to copy data back after shifting.  The HPJava
+program is given in figure \ref{fig:HPfox}.
+The subroutine \texttt{matmul} for local matrix multiplication
+will be given in the next section.
+
+This HPJava program is slightly atypical: it uses arrays distributed
+explicitly over process dimensions, rather than using higher-level
+ranges such as \texttt{BlockRange} to describe the distribution of the
+arrays.  Hence, two-dimensional matrices are represented as four
+dimensional arrays with two distributed ranges (actually process
+dimensions) and two collapsed ranges (spanning the local block).  This
+simplifies the initial discussion.
+
+\begin{figure}[ht]
+\center{
+\footnotesize
+\begin{verbatim}
+  Procs2 p = new Procs2(P,P);
+  Range x = p.dim(0), y = p.dim(1);
+  on(p) {
+    float [[,,*,*]] a = new float [[x,y,B,B]]; 
+    float [[,,*,*]] b = new float [[x,y,B,B]]; 
+
+    ... initialize a, b elements ...
+
+    float [[,,*,*]] c = new float [[x,y,B,B]]; 
+    float [[,,*,*]] tmp = new float [[x,y,B,B]]; 
+                  
+    for (int k = 0; k<P; k++) {
+      overall(i = x) {
+        float [[*,*]] sub = new float [[B,B]];    
+        Adlib.remap(sub, a[[i, (x.idx(i) + k) % P, :, :]]);
+                          // Broadcast sub-matrix of 'a'
+        overall(j = y)
+          matmul(c[[i, j, :, :]], sub, b[[i, j, :, :]]);
+                          // Local matrix multiplication
+      }
+      Adlib.shift(tmp, b, 1, 0, CYCLIC); 
+                          // Cyclic shift 'b' in first dim, amount 1
+      Adlib.copy(b, tmp);
+    }
+  }
+\end{verbatim}
+}
+\caption{Algorithm for matrix multiplication in HPJava}
+\label{fig:HPfox}
+\end{figure}
+
+We can rewrite the program in pure Java language using our adJava
+interface.  A translation is given in figure \ref{fig:adfox}.  This is
+an executable Java program.  One can use (for example) \texttt{mpirun}
+to start Java virtual machines on $P^2$ processors and let them
+simultaneously load the {\tt Fox} class.  This naive translation uses
+{\em for} loops plus {\em at} constructs to simulate the
+{\em overall} constructs.  The function pairs
+\texttt{on},\texttt{no} and \texttt{at},\texttt{ta} adjust the field
+\texttt{spmd.apg}, which records the current active process group.  The
+dynamic alteration of this group plays an non-trivial role in this
+program.  The call to {\tt remap} implements a broadcast because the
+temporary {\tt sub} is replicated over the process group active at it's
+point of declaration.  Within the {\tt overall(i = x)} construct, the
+locally effective APG is a row of the process grid.
+The rather complex code for section construction exposes various low-level
+inquiries (and one auxilliary class, {\tt Map}) from the adJava
+runtime.  The details are not particulary important here.
+
+\begin{figure}[htbp]
+\center{
+\scriptsize
+\begin{verbatim}
+class Fox {
+  final static int P=2;
+  final static int B=4;
+
+  public static void matmul(Array2Float c,Array2Float a,Array2Float b) {
+    ... implemented in next section ...
+  };
+
+  public static void main(String argv[]) {
+    SpmdEnv spmd = new SpmdEnv(argv);
+    Procs2 p=new Procs2(P,P);
+    Range x=p.dim(0); Range y=p.dim(1); 
+    if(p.on()) {
+      Section4ddccF a = new Array4ddccF(spmd.apg,x,y,B,B);
+      Section4ddccF b = new Array4ddccF(spmd.apg,x,y,B,B);
+
+      ... initialize a, b elements ...
+
+      Section4ddccF c = new Array4ddccF(spmd.apg,x,y,B,B);
+      Section4ddccF tmp = new Array4ddccF(spmd.apg,x,y,B,B);
+
+      for (int k=0; k<P; k++) {
+        for (int i=0; i<P; i++) {
+          Location ii = x.location(i);
+          if (ii.at()) {
+            Section2ccF sub = new Array2ccF(spmd.apg,B,B);
+            Location kk = a.rng(1).location((i + k) % P) ;
+            Adlib.remap(sub,
+                new Array2ccF(a.grp().restrict(ii).restrict(kk),
+                              a.map(2), a.map(3), a.dat(),
+                              a.map(0).offset(ii) + a.map(1).offset(kk)) ;
+                                  // Broadcast sub-matrix of 'a'
+            for (int j=0; j<P; j++) {
+              Location jj = y.location(j);
+              if (jj.at()) {
+                matmul(new Array2ccF(c.grp().restrict(ii).restrict(jj),
+                                     c.map(2), c.map(3), c.dat(),
+                                     c.map(0).offset(ii) + c.map(1).offset(jj)),
+                       new Array2ccF(b.grp().restrict(ii).restrict(jj),
+                                     b.map(2), b.map(3), b.dat(),
+                                     b.map(0).offset(ii) + b.map(1).offset(jj))) ;
+                          // Local matrix multiplication
+              } jj.ta();
+            }
+          } ii.ta();
+        }
+        Adlib.shift(tmp, b, 1, 0, 0); 
+                          // Cyclic shift 'b' in first dim, amount 1
+        Adlib.copy(b, tmp);
+      }
+    }
+  }
+} 
+\end{verbatim}
+}
+\caption{Algorithm for matrix multiplication in adJava}
+\label{fig:adfox}
+\end{figure}
+
+\subsection{Improving the performance}
+\label{sec:optimization}
+
+The program for the Fox algorithm is completed by the definition of
+\texttt{matmul}.  First in HPJava:
+\begin{small}
+\begin{verbatim}
+  void matmul (float[[*,*]] c, float[[*,*]] b, float[[*,*]] c) {
+    for (int i=0; i<B; i++)
+      for (int j=0; j<B; j++)
+        for (int k=0; k<B; k++) 
+          c[i,j]+=a[i,k]*b[k,j];
+  }
+\end{verbatim}
+\end{small}   
+Translated naively to the adJava interface, this becomes:
+\begin{small}
+\begin{verbatim}
+  public static void matmul(Section2ccF c, Section2ccF a, Section2ccF b) {
+
+    for (int i=0; i<B; i++)
+      for (int j=0; j<B; j++)
+        for (int k=0; k<B; k++)
+          c.dat()[c.pos(i, j)] +=
+              a.dat()[a.pos(i, k)] * b.dat()[b.pos(k, j)];
+  }
+\end{verbatim}
+\end{small}   
+The methods \texttt{dat} and \texttt{pos} were introduced
+earlier.
+
+It is clear that the segment of code above will have very poor run-time
+performance, because it involves many method invocations for each
+array element access.  Because the array data is actually stored
+in a certain regularly strided section of a Java array, these calls are not
+really necessary.  All that is needed is to find the address of the
+first array element, then write the other addresses as
+a linear expression in the loop variable and this initial value.
+The code above can be rewritten in the form given in figure
+\ref{fig:matmul}.  This optimization again exposes various low-level
+functions in the runtime---we omit details
+(see \cite{NPAC_PCRC_kernel}).  
+The effect is to compute the parameters of the linear
+expressions for the local address offsets.  This allows inlining of the
+{\tt element} calls.  In this case the resulting expressions are linear
+in the induction variables of the {\em for} loops.  If necessary the
+multiplications can be eliminated by standard compiler optimizations.
+
+\begin{figure}[htb]
+\center{
+\footnotesize
+\begin{verbatim}
+  public static void matmul(Section2ccF c, Section2ccF a, Section2ccF b) {
+
+    Map c_u0=c.map(0);
+    Map c_u1=c.map(1);
+
+    final int i_c_bas=c_u0.disp();
+    final int i_c_stp=c_u0.step();
+    final int j_c_bas=c_u1.disp();
+    final int j_c_stp=c_u1.step();
+
+    ... similar inquiries for a and b ...
+
+    for (int i=0; i<B; i++) {
+      for (int j=0; j<B; j++) {
+        for (int k=0; k<B; k++) {
+          c.data[i_c_bas + i_c_stp * i + j_c_bas + j_c_stp * j] +=
+            a.data[i_a_bas + i_a_stp * i + k_a_bas + k_a_stp * k] *
+            b.data[k_b_bas + k_b_stp * k + j_b_bas + j_b_stp * j];
+        }
+      }
+    }
+  }
+\end{verbatim}
+}
+\caption{Optimized translation of {\tt matmul}\label{fig:matmul}}
+\end{figure}
+
+This segment of Java code will certainly run much faster.  The drawback
+is that, compared with the first Java procedure, the optimized code is
+less readable.  This is a simple example of the need for compiler
+intervention if the HPJava style of programming is to be made
+acceptable.  Similar and more compelling examples arise in optimization
+of the overall construct.  As described in \cite{High_Level_SPMD} and
+illustrated in the example of the last section, a trivial
+implementation of the general overall construct is by a {\em for} loop
+surrounding an {\em at} construct.  More sensibly, all the machines
+across a process dimension should simultaneously execute the body for
+all locally held locations in the relevant distributed range.
+Computation of the local offset of the array element can again be
+reduced to a linear expression in a loop variable instead of a function
+call.
+
+\section{Issues in the language design}
+\label{sec:consideration}
+
+With some of the implementation mechanisms exposed, we can
+better discuss the language design itself.
+
+\subsection{Extending the Java language}
+
+The first question to answer is why use Java as a base language?
+Actually, the programming model embodied in HPJava is largely language
+independent.  It can bound to other languages like C, C++ and Fortran.
+But Java is a convenient base language, especially for initial
+experiments, because it provides full object-orientation---convenient
+for describing complex distributed data---implemented in a relatively
+simple setting, conducive to implementation of source-to-source
+translators.  It has been noted elsewhere that Java has various
+features suggesting it could be an attractive language for science
+and engineering \cite{Java98}.
+
+With Java as base language, an obvious question is whether we can
+extend the language by simply adding packages, instead of changing the
+syntax.  There are two problems with doing this for data-parallel
+programming.
+
+Our baseline is HPF, and any package supporting parallel arrays as
+general as HPF is likely cumbersome to code with.  The examples given
+earlier using the adJava interface illustrate this point.  Our runtime
+system needs an (in principle) infinite series of class names
+\begin{small}
+\begin{verbatim}
+   Array1dI, Array1cI, Array2ddI, Array2dcI, ...
+\end{verbatim}
+\end{small}
+to express the HPJava types
+\begin{small}
+\begin{verbatim}
+  int [[]], int [[*]], int [[,]], int [[,*]] ... 
+\end{verbatim}
+\end{small}
+as well as the corresponding series for \texttt{char}, \texttt{float}, and so on.
+To access an element of a distributed array in HPJava, one writes
+\begin{small}
+\begin{verbatim}
+  a[i] = 3 ;
+\end{verbatim}
+\end{small}
+In the adJava interface, it must be written as,
+\begin{small}
+\begin{verbatim}
+  a.dat()[a.pos(i)] = 3 ;
+\end{verbatim}
+\end{small}
+This is for {\em simple} subscripting.  In passing in section
+\ref{sec:adJava} we noted how even more complex Fortran-90 style
+regular section construction appeared using the raw class library
+interface.
+
+The second problems is that a Java program using a package like adJava
+in a direct, naive way will have very poor performance, because all the
+local address of the global array are expressed by functions such as
+\texttt{pos}.  An optimization pass is needed to transform offset
+computation to a more intelligent style, as suggested in section
+\ref{sec:optimization}.  So if a preprocessor must do these
+optimizations anyway, it makes most sense to design a set of syntax to
+express the concepts of the programming model more naturally.
+
+\subsection{Why not HPF?}
+
+The design of the HPJava language is strongly influenced by HPF.
+The language emerged partly out of practices adopted in our efforts to
+implement an HPF compilation system \cite{PCRC_based}.  For example:
+\begin{small}
+\begin{verbatim}
+  !HPF$ POCESSOR    P(4)
+  !HPF$ TEMPLET     T(100)
+  !HPF$ DISTRIBUTE  T(BLOCK) ONTO P
+        REAL        A(100,100), B(100)
+  !HPF$ ALIGN       A(:,*) WITH T(:)
+  !HPF$ ALIGN       B WITH T
+\end{verbatim}
+\end{small}
+have their conterparts in HPJava:
+\begin{small}
+\begin{verbatim}
+  Procs1 p = new Procs1(4);
+  Range x = new BlockRange (100, p.dim(0));
+  float [[,*]] a = new float [[x,100]] on p;
+  float [[ ]] b = new float [[x]] on p;
+\end{verbatim}
+\end{small}
+Both languages provide a globally addressed name space for data parallel
+applications.  Both of them can specify how data are mapped on to a
+processor grid.  The difference between the two lies in their
+communication aspects.  In HPF, a simple assignment statement may cause data
+movement.  For example, given the above distribution, the assignment
+\begin{small}
+\begin{verbatim}
+  A(10,10) = B(30)
+\end{verbatim}
+\end{small}
+will cause communication between processor 1 and 2.  In HPJava, similar
+communication must be done through explicit function calls\footnote{By default
+Fortran array subscripts starts from 1, while HPJava global subscripts always
+start from 0.}:
+\begin{small}
+\begin{verbatim}
+  Adlib.remap(a[[9,9]], b[[29]]);
+\end{verbatim}
+\end{small}
+Experience from compiling the HPF language suggests that, while there
+are various kinds of algorithms to detect communication automatically,
+it is often difficult to give the generated node program acceptable
+performance.  In HPF, the need to decide on which processor the
+computation should be executed further complicates the situation.  One
+may apply ``owner computes'' or ``majority computes'' rules to
+partition computation, but these heuristics are difficult to apply in
+many situations.
+
+In HPJava, the SPMD programming model is emphasized.  The distributed
+arrays just help the programmer organize data, and simplify
+global-to-local address translation.  The tasks of computation
+partition and communication are still under control of the programmer.
+This is certainly an extra onus, and the language is more difficult to
+program than HPF\footnote{The program must meet SPMD constraints, eg,
+only the owner of an element can access that data.  Runtime checking
+can be added automatically to ensure such conditions are met.}; but
+it helps programmer to understand the performance of the program much
+better than in HPF, so algorithms exploiting locality and parallelism
+are encouraged.  It also dramatically simplifies the work of the
+compiler.
+
+Because the communication sector is considered an ``add-on'' to the
+basic language, HPJava should interoperate more smoothly than HPF with
+other successful SPMD libraries, including MPI \cite{MPIStandard},
+CHAOS \cite{CHAOS}, Global Arrays \cite{Global_Arrays},
+%DAGH \cite{HDDA_DAGH}, 
+and so on.
+
+\subsection{Datatypes in HPJava}
+
+In a parallel language, it is desirable to have both local variables
+(like the ones in MPI programming) and \emph{global} variables (like
+the ones in HPF programming).  The former provide flexibility and are
+ideal for task parallel programming; the latter are convenient
+especially for data parallel programming.
+
+In HPJava, variable names are divided into two sets.  
+In general those declared
+using ordinary Java syntax represent local variables and those
+declared with \texttt{[[ ]]} represent global variables.
+The two sectors are independent.
+In the implementation of HPJava the global variables have special data
+descriptors associated with them, defining how their components are
+divided or replicated across processes.
+The significance of the data descriptor is most obvious when
+dealing with procedure calls.  
+
+Passing array sections to procedure calls is an important component in
+the array processing facilities of Fortran90 \cite{Fortran90}.  The data
+descriptor of Fortran90 will include stride information for each array
+dimension.  One can assume that HPF needs a much more complex kind of
+data descriptor to allow passing distributed arrays across procedure
+boundaries.  In either case the descriptor is not visible to the
+programmer.  Java has a more explicit data descriptor concept; its
+arrays are considered as objects, with, for example, a publicly
+accessible \texttt{length} field.  In HPJava, the data descriptors for
+global data are similar to those used in HPF, but more explicitly
+exposed to programmers.  Inquiry functions such as \texttt{grp()},
+\texttt{rng()} have a similar role in global data to the field
+\texttt{length} in an ordinary Java array.
+
+%In HPJava, an array can be sectioned to yield a ``zero-dimensional
+%array'' by specifiying all scalar subscripts in double brackets.  The
+%result is a global data entity {\em containing} the associated array element;
+%the result is {\em not} the element itself.  The difference between an
+%array sectioned to a global scalar and an array elment is that the global
+%scalar has a descriptor specifying the process group that holds the element.
+%This one reason why \texttt{[[~]]} is used for the
+%section operation and \texttt{[~]} is used for array element access.
+%The symbol \texttt{\#} is introduced to augment the type
+%signature of a global scalar reference (a zero-dimensional array) to
+%distinguish it from an ordinary Java scalar.
+
+Keeping two data sectors seems to complicate the language and its
+syntax.  But it provides convenience for both task and data parallel
+processing.  There is no need for things like the \texttt{LOCAL}
+mechanism in HPF to call a local procedure on the node processor.  The
+descriptors for ordinary Java variables are unchanged in HPJava.  On
+each node processor ordinary Java data will be used as local varables,
+like in an MPI program.
+
+%It is allowed to combine the two different kinds of array
+%(standard Java and distributed) of the language.  For example:
+%\begin{small}
+%\begin{verbatim}
+%  int[] size = {100, 200, 400};
+%  float [[,]] d [] = new float [size.length][[,]];
+%  Range x[];
+%  Range y[];
+%  for (int l = 0; l < size.length; l++) {
+%    x[l] = new BlockRange(size[l], p.dim(0)) ;  
+%    y[l] = new BlockRange(size[l], p.dim(1)) ;  
+%    d[l] = new float [[x[l], y[l]]];
+%  }
+%\end{verbatim}
+%\end{small}
+%will create an array like the one shown in figure \ref{fig:layer}.
+%This facility is useful for multigrid and multiblock algorithms.
+%
+%\begin{figure}[htbp]
+%  \begin{center}
+%    \leavevmode
+%    \psfig{figure=layer.eps} 
+%    \caption{Array of distributed arrays}
+%    \label{fig:layer}
+%  \end{center}
+%\end{figure}
+
+\subsection{Programming convenience}
+
+The language provides some special syntax for the programmer's
+convenience.  Unlike the syntax for data declaration, which has
+fundamental significance in the programming model, these extensions are
+purely provide syntactic conveniences.
+
+There are a limited number of Java operators overloaded.  A group
+object can be {\em restricted} by a location using the \texttt{/}
+operation, and a sub-range or location can be obtained from a range
+using the \texttt{[~]} operator enclosing a triplet expression or an
+integer, These pieces of syntax can be considered as shorthand for
+suitable constructors in the corresponding classes.  This is comparable
+to the way Java provides special syntax support for String class
+constructor.
+
+Another kind of overloading occurs in \emph{location shift}, which is
+used to support \emph{ghost regions}.  A shift operator \texttt{+} is
+defined between a location and an integer.  It will be illustrated in
+the examples in the next section.  This is a restricted operation---it
+has meaning (and is legal) only in an array subscript expression.
+
+%\section{Example programs}
+%\label{sec:example}
+%
+%In this section, we give some more interesting examples of HPJava code.
+%The first example is Choleski decomposition, in which one needs to
+%update $n$ submatrices by subtracting an outer product of two
+%vectors.  On a parallel computer with a distributed memory, the array
+%may have a column-interleaved storage, then each processor can update
+%its own column after getting the first updated column of the matrix or
+%submatrix.
+%
+%The above algorithm is written in HPJava in figure \ref{fig:choleski}.
+%In the code, a cyclic range is used to allocate the original array on
+%multiprocessors.  The result lower triangular matrix overwrites part of
+%its storage.  During the computation, the collective communication
+%\texttt{remap} is used for broadcasting updated columns.
+%
+%\begin{figure}[htbp]
+%\small
+%\begin{verbatim}
+%  Procs1 p = new Procs1(P) ;
+%  on(p) {
+%    Range x = new CyclicRange(N, p.dim(0));
+%
+%    float [[*,]] a = new float [[N, x]] ;
+%
+%    float [[*]]  b = new float [[N]] ;
+%
+%    ... some code to initialise `a' ...
+%
+%    for(int k = 0 ; k < N - 1 ; k++) {
+%
+%      at(l = x[k]) {
+%        float d =  Math.sqrt(a[k,l]) ;
+%
+%        a[k,l] = d ;
+%        for(int s = k + 1 ; s < N ; s++)
+%          a[s,l] /= d ;
+%      }
+%
+%      Adlib.remap(b[[k + 1 : ]], a[[k + 1 :, k]]);
+%
+%      overall(l = x[k + 1 : ])
+%        for(int i = x.idx(l) ; i < N ; i++)
+%          a[i,l] -= b[i] * b[x.idx(l)] ;
+%    }
+%
+%    at(l = x [N - 1])
+%      a[N - 1,l] = Math.sqrt(a[N-1,l]) ;
+%  }
+%\end{verbatim}
+%\caption{Choleski decomposition in HPJava}
+%\label{fig:choleski}
+%\end{figure}
+%
+%The second example is Jacobi iteration. The algorithm calculates
+%the average value of the neighboring elements.  A ghost area is
+%defined when the global array is defined through a special
+%\texttt{BlockRange} constructor.  In the code of figure
+%\ref{fig:jacobi} there is only one iteration.  The library function
+%\texttt{writeHalo} performs the necessary communications to
+%update ghost edges to make it ready for the iteration.
+%
+%\begin{figure}[htbp]
+%\small
+%\begin{verbatim}
+%  Procs2 p = new Procs2(2, 4);
+%  Range x = new BlockRange(100, p.dim(0), 1); 
+%  Range y = new BlockRange(200, p.dim(1), 1); 
+%  on(p) {
+%    float [[,]] a = new int [[x,y]] ;
+%
+%    ... some code to initialize `a' ...
+%
+%    float [[,]] b = new int [[x,y]];
+%
+%    Adlib.writeHalo(a);
+%
+%    overall(i = x)
+%      overall(j = y)
+%        b[i,j] = (a[i-1,j] + a[i+1,j] + 
+%                  a[i,j-1] + a[i,j+1]) * 0.25;
+%    overall(i = x)
+%      overall(j = y)
+%        a[i,j] = b[i,j];
+%  }
+%\end{verbatim}
+%\caption{Jacobi iteration in HPJava}
+%\label{fig:jacobi}
+%\end{figure}
+
+
+\section{Concluding remarks}
+\label{sec:conclusion}
+
+In this report, we discussed design and implementation issues in
+HPJava, a new programming language we have proposed.  We claim that the
+language has the flexibility of SPMD programming, and much of the
+convenience of HPF. Related languages include F-- \cite{FMM}, Spar
+\cite{Spar}, ZPL \cite{ZPL} and Titanium \cite{Titanium}.  They all
+take different approaches from ours.  The implementation of HPJava is
+straightforwardly supported by a runtime library.  In the next step, we
+will complete the HPJava translator and implement further
+optimizations.  At the same time, we plan to integrate further SPMD
+libraries into the framework.
+
+\bibliography{considerations}
+
+\end{document}

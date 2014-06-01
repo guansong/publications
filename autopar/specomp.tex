@@ -1,0 +1,95 @@
+%\newpage
+
+\section{Missed parallelization opportunities}
+\label{opportunities}
+
+As expected, the performance improvements from auto-parallelization
+are limited (refer to Section \ref{summary} for the actual data). To understand the auto-parallelization results, we compare our results with the SPECOMP benchmarks. For an SMP machine with a small number of processors, SPECOMP achieves relatively good performance and scalability. With this comparison, we hope to understand the reasons for the disparity in the results between explicit and auto parallelization and also expose opportunities missed by the auto-parallelizer.
+
+Among the 14 SPEC2000FP benchmarks, 10 of them are also included in
+SPECOMP test suite. The two versions of the benchmarks were compared on a loop-to-loop basis. This analysis exposes limitations in the auto-parallelizer and also led to some very interesting observations. We list here some of the cases where the auto-parallelizer failed to parallelize a loop that was explicitly parallelized in the SPECOMP version. We believe that improvements to the auto-parallelizer to handle these cases can result in significant performance
+improvements for at least some of the benchmarks. To prove this, we try to manually parallelize loops that were explicitly parallelized in SPECOMP and compare the performance gain (manual parallelization is not possible in all cases).
+ 
+
+\subsection {Case 1: Loop body contains function calls}
+
+The auto-parallelizer fails to parallelize loops that have function calls in the loop body. Function calls could result in side-effects; the current auto-parallelizer is not capable of handling such loops. 
+Shown here is a code snip found in \emph{wupwise} where the loop body has function calls. \emph{wupwise} has four such case, two in muldeo.f and
+ two in muldoe.f. Manual parallelization of such loops shows good speedup. To manually parallelize the loops, array's AUX1 and AUX3 were privatized. The execution time is about 114 seconds with one thread, 61.8 seconds for
+two threads and 46.5 seconds with four threads, i.e., a 46\% improvement with 2 threads and 59\% improvement with 4 threads over using 1 thread. More complicated forms of this case exists in \emph{apsi}, \emph{galgel} and \emph{applu}
+
+{\small
+\begin{verbatim}
+      COMPLEX*16   AUX1(12),AUX3(12)
+      ....
+      
+      DO 100 JKL = 0, N2 * N3 * N4 - 1
+        L = MOD (JKL / (N2 * N3), N4) + 1
+        LP=MOD(L,N4)+1
+        K = MOD (JKL / N2, N3) + 1
+        KP=MOD(K,N3)+1
+        J = MOD (JKL, N2) + 1
+        JP=MOD(J,N2)+1
+        DO 100 I=(MOD(J+K+L,2)+1),N1,2
+          IP=MOD(I,N1)+1
+          CALL GAMMUL(1,0,X(1,(IP+1)/2,J,K,L),AUX1)
+          CALL SU3MUL(U(1,1,1,I,J,K,L),'N',AUX1,AUX3)
+          CALL ZCOPY(12,AUX3,1,RESULT(1,(I+1)/2,J,K,L),1)
+100   CONTINUE
+\end{verbatim}
+}
+
+\subsection {Case 2: Array privatization}
+
+Several loops in SPECOMP benchmarks have arrays that are explicitly marked as private, enabling the loops to be parallelized. Array privatization analysis is not yet implemented in our parallelizer preventing it from exploiting these opportunities. The code snip in Case 1 illustrates an example where array privatization is required in order to parallelize the loop. 3 such nested loops can be found in subroutine \emph{rhs} of \emph{applu}. Manual parallelization of such loops resulted in a 12\% performance gain for \emph{applu}. Similar situations exist in \emph{galgel} and {apsi}
+
+\subsection{Case 3: Zero trip loops}
+
+Zero trip loops are loops in which the number of iterations calculated
+from the parameters of the loop is less than 1. There are 8 such
+loops in \emph{apsi}, one of which is shown below. There exists loop carried dependence on the induction variable L, which the compiler tries to eliminate by rewriting the induction variable in terms of the loop parameters. However, in the case shown here, the parallelizer cannot identify L as an induction variable because of the possibility that the value of NX or NY is zero, thereby preventing the outer loop from getting parallelized. By manually parallelizing the outermost
+loop of such loops, the performance of \emph{apsi} was improved by 3\%.
+
+{\small
+\begin{verbatim}
+      DO 30 K=1,NZTOP
+        DO 20 J=1,NY
+          DO 10 I=1,NX
+            L=L+1
+            DCDX(L)=-(UX(L)+UM(K))*DCDX(L)-(VY(L)+VM(K))*DCDY(L)
+     *              +Q(L)
+ 10       CONTINUE
+ 20     CONTINUE
+ 30   CONTINUE
+\end{verbatim}
+}
+
+%\subsection{Pointer used in the loop body}
+
+%There are total 6 loops in the file rectmm.c are parallelized in
+%specomp2001 benchmark ammp. The similarity of the loops is that the
+%pointer variable pointing to an array or struct is used in the loop
+%body. Figure 5 is the code segment from ammp. In the figure, nodelist
+%is a pointer to a construct MMNODE. The alias analysis failed to
+%eliminate the loop carried dependence of the pointer variables. So the
+%parallelizer cannot parallelize the outermost loops. Making these
+%loops parallelized would give ammp 7\% performance improvement.
+
+
+%{\small
+%\begin{verbatim}
+%  MMNODE (*nodelistt)[];
+%  for( ix=0; ix< nx; ix++)
+%    for( iy=0; iy< ny; iy++)
+%      for( iz=0; iz< nz; iz++)
+%        {
+%          inode = ((iz*ny)+iy)*nx + ix;
+%          (*nodelist)[inode].xc = ix*mmbox + .5*mmbox + xmin;
+%          (*nodelist)[inode].yc = iy*mmbox + .5*mmbox + ymin;
+%          (*nodelist)[inode].zc = iz*mmbox + .5*mmbox + zmin;
+%        }
+%\end{verbatim}
+%}
+
+
+

@@ -1,0 +1,89 @@
+\section{Benchmarks and Summary}
+
+In this section, we use some benchmark numbers to summarize the project. The
+OpenMP compiler introduced in \cite{Br07} and this paper as a product are
+general available now. The data listed here can be reproduced, although some
+slight difference may exit, as we are using a development version of the
+compiler.
+
+As the Fortran support is not robust as the C/C++ yet, We choose the NAS 2.3 C
+version as our benchmarks.
+
+Table \ref{performance} shows the performance of 8 SPUs against one PPU
+execution. We also include two extra benchmarks, a PDE solver, packaged in the
+single source compiler distribution as an example, and LBM, the CPU benchmark
+in spec2k6 with OpenMP directives.
+
+We do need to modify the source code a little bit to make it fit for the
+compiler, the main changes are
+
+\begin{itemize} 
+
+  \item Using restricted pointer or adding disjoined pragma to indicate that
+    two arrays will not overlay each other. Although interprocedure compilation
+    can trace pointer targets, there are cases which do need users to give more
+    accurate info.
+  
+  \item Change the data location, either privatize a variable to make it stay
+    on SPU local store or malloc an array from system storage. These two looks
+    contradictory, the first one aims to speed up access, the second one is to
+    save SPU local store space.
+
+  \item Data access alignment. This is due to DMA operation will be more
+    efficient if the data can be 128 byte aligned.
+
+\end{itemize}
+
+From the table we can see that not every benchmark speed up nicely. Here are
+many reasons for this. A complicated parallel region with a lot of branches
+inside may cause SPU slow down. Data access pattern is not regular, DMA tiler
+can not tile the loop, so the memory access has to go though software cache. As
+we are improving the tiler performance, we do hope some of them can be further
+improved.
+
+In this paper, we summarized how to map OpenMP constructs onto a Cell
+processor, from a \texttt{parallel} region to different workshares and
+barriers. We have omitted the implementation details of these, concentrating on
+the framework which will help the user visualize the framework of the OpenMP
+runtime system on a Cell processor. Please refer to the references for how to
+implement software cache DMA tiler and SPU simdization.
+
+There is still on-going work to further enhance the compilation system, such a
+enlarge the DMA tiler region, improving auto simdization. For future runtime
+enhancements, we will look at the task support in the OpenMP 3.0 standard.
+
+\begin{table}
+  \begin{center}
+    \begin{tabular}{|l|c|c|c|c|} \hline
+      \bf Benchmark & \bf \# of lines changed & \bf sequential time & \bf parallel time & \bf speedup \\
+      \hline
+      \hline
+      BT & 0 & 588.48 &  &  \\
+      \hline
+      CG & 0 & 20.12 & 13.78 & 1.46 \\
+      \hline
+      EP & 0 & 72.05 & 12.63 & 5.66 \\
+      \hline
+      FT & 4 & 42.19 & 11.66 & 3.65 \\
+      \hline
+      IS & 10 & 10.54 & 2.68 & 3.94 \\
+      \hline
+      LU & 0 & 356.8 & 209.71 & 1.71 \\
+      \hline
+      MG & 10 & 17.38 & 2.41 & 7.2 \\
+      \hline
+      SP & 10 & 413.99 & 134.69 & 3.08 \\
+      \hline
+      \hline
+      PDE &  & 27.59 & 0.65 & 42.38 \\
+      \hline
+      LBM &  & 1553.91 & 147.61 & 10.66 \\
+      \hline
+    \end{tabular}
+    \vspace{0.5cm}
+    \caption{\label{performance}Performance evaluation}
+  \end{center}
+\end{table}
+
+
+

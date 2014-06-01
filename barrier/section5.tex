@@ -1,0 +1,36 @@
+%\newpage
+
+\section{Summary and future work}
+\label{summary}
+
+Barrier synchronization is a well-studied topic, and an important
+one in parallel programming. In this paper, we studied the performance
+characteristics of several alternative implementations of barrier
+synchronization on modern, complex shared memory multiprocessors.
+
+We have implemented several different barrier schemes and measured their performance on the shared memory POWER3 system and the distributed shared
+memory POWER4 system. We analyzed barrier performance data through
+timing and hardware performance counters. In the future, we wish to study
+the impact of different barrier implementations on other shared memory
+platforms particularly looking at issues of non-uniform memory access and
+scalability.
+
+Through the introduction of the \emph{distributed counters with local sensor}
+implementation, we have demonstrated a dramatic 79\% reduction in overhead on a
+32-way POWER4 system when comparing to a fetch-and-add implementation and a 33\%
+improvement on the same system over the next best technique, distributed
+counters with padding.  While these experiments were done using the explicit 
+barrier test in EPCC microbenchmarks,
+we get similar improvements in the performance of the implied barriers
+terminating work-sharing constructs and parallel regions.  The availability of
+a low overhead barrier also provides more freedom to the compiler to automatically
+introduce parallelism in serial code.
+
+% how about irregular
+
+%Understanding more about the ccNUMA system
+
+%We treat the system more like a distributed message-passing one.
+
+%memory affinity processor affinity.
+

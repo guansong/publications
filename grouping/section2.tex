@@ -1,0 +1,439 @@
+%\pagebreak
+
+\section{Processor group}
+
+In the previous section, all the logical processors are considered as a linear
+array. This is a simplification which will hide all the architecture
+structure of a real machine. In this section, we will extend the view to
+represent more complex architectures. To support this, we need to introduce the
+following concepts in the OpenMP APIs.
+
+\begin{itemize}
+
+  \item \emph{Hierarchical} level: This represents a programmer's view of the
+    hierarchy level that the hardware support. For example, a 4-way Pentium
+    processor with hyper thread enabled can be viewed as either one group of
+    eight processors on the same level, an 8 element linear array; Or two
+    levels of processor groups, with four processor groups at the top level and
+    two processors in each group at the second level.
+
+  \item \emph{Processor group}: A handle to an opaque data structure which
+    represents a group of processors. It will be a new internal type in the
+    language extension. We will use a temporary name \texttt{omp\_procs}
+    to represent this type. (A previous example in the language is a variable of
+    \texttt{omp\_lock} type.) As in HPF\cite{Koe93}, a variable of this
+    type can be used with Fortran array syntax.
+    %where essential operations like
+    %subteam is supported.
+
+  \item \texttt{omp run on} \emph{construct}: This will specify on which
+    processor group OpenMP threads will continue to execute and form a new
+    group. When a program is running, the sequential part will be executed on
+    a master thread in the \emph{master group}.  When a parallel region is
+    encountered, the group members will execute in parallel and share the
+    workshares bound to the region\footnote{More discussion is needed for the
+    situation that another group is specified on the second level of parallel
+    region. Possible issues may include thread migrating and thread stealing.}.
+    The mapping method introduced in the previous section will still work here
+    for distributing the threads among the processors\footnote{We may decide later
+    whether to allow different mapping for different processor groups through
+    multiple \emph{internal control variables}}.
+
+\end{itemize}
+
+To express the three concepts in the OpenMP API, the following extensions are
+suggested\footnote{
+%All the pseudo code is in C++ style if not specified otherwise. 
+The function names are all tentative, and can be all different in different
+language bindings. And they may not be limited to these.}
+
+
+{\footnotesize
+\begin{verbatim}
+    const omp_procs * omp_get_procs(void);
+\end{verbatim}
+}
+
+This function will return a runtime variable, which has the data type as a
+pointer to \texttt{omp\_procs}. This is the address
+%\footnote{An alternative definition is to let it return an opaque omp\_procs
+%object.  The advantage is that it looks much simpler in memory space handling.
+%The drawback is that the object has to be copied, even though it should be
+%only a small structure.}
+of our special handle pointing to the underlining machine where the program
+will run. By default, all the program was executed as if it was run on
+this processor group. The \texttt{const} modifier indicating that a user can
+not change this variable.
+
+The processor group provides a way to encapsulate detailed system informations
+for an application. 
+%With different configurations, it is possible to set the parallel architecture
+%of the same physical machine to be different for different users, as our
+%previous example with the hyperthread processor. 
+We will use some annotated pseudo code as examples to further illustrate these
+ideas.
+
+\subsection{Group operation}
+
+Suppose we have a machine setup as Figure \ref{fig:arches} \emph{a}, and we
+assume for certain reasons the single core chips are faster.
+
+These functions
+{\footnotesize
+\begin{verbatim}
+    const omp_procs & processor = * omp_get_procs();
+    const omp_procs & processor = * omp_get_running_procs();
+\end{verbatim}
+}
+
+at the beginning of the program will both give us a variable named
+\texttt{processor} to represent the logical view of a processor group.  We can
+define a member function to get the number of members of the group
+
+{\footnotesize
+\begin{verbatim}
+    const int omp_procs::get_num_members(void) const; 
+\end{verbatim}
+}
+
+We use the \texttt{[]} operator to overload the function to get member element
+
+{\footnotesize
+\begin{verbatim}
+    const omp_procs::get_member(int index) const; 
+\end{verbatim}
+}
+
+Then we may have,
+
+{\footnotesize
+\begin{verbatim}
+    const omp_procs g0=processor[0];
+    const omp_procs g1=processor[1];
+    const omp_procs g2=processor[2];
+    const omp_procs g3=processor[3];
+\end{verbatim}
+}
+
+Suppose the processors were organized as two levels of hierarchy. So, 
+
+{\footnotesize
+\begin{verbatim}
+    // g0 and g2 have two processors each
+    Assert(g0.get_num_members()==2 && g2.get_num_members()==2);
+    // g1 and g3 only have one processor each
+    Assert(g1.get_num_members()==1 && g3.get_num_members()==1);
+
+    // omp_procs is a hierarchy,
+    // it won't be 6 if queried at this level
+    Assert(get_omp_procs()->get_num_members()==4);
+\end{verbatim}
+}
+
+Again, we get members as,
+
+{\footnotesize
+\begin{verbatim}
+    const omp_procs g4=g1[0]; const omp_procs g5=g1[1];
+    const omp_procs g6=g3[0]; const omp_procs g7=g3[1];
+\end{verbatim}
+}
+
+We like to let the two faster processors each having two logical processors,
+
+{\footnotesize
+\begin{verbatim}
+    // Create new threads on g1 and g3
+    omp_procs * gptr0=new(g1) omp_procs[2];
+    omp_procs * gptr1=new(g3) omp_procs[2];
+
+    // Let operator [] work with a processor group address, 
+    // same as ptr->get_member(int index)
+    const omp_procs g8=gptr0[0];
+    const omp_procs g9=gptr0[1];
+
+    const omp_procs g10=gptr1[0];
+    const omp_procs g11=gptr1[1];
+\end{verbatim}
+}
+
+We organize them as a new flat array of processors.
+
+{\footnotesize
+\begin{verbatim}
+    // This uses c++ array constructor
+    const omp_procs g12[]={g8,g9,g4,g5,g10,g11,g6,g7};
+\end{verbatim}
+}
+
+Now we can write code like this,
+
+{\footnotesize
+\begin{verbatim}
+    // On all the processors we grouped previously
+    #pragma omp parallel on g12[:]
+    {
+      // all the old omp code should be here 
+      ...
+    }
+\end{verbatim}
+}
+
+A triplet \texttt{[::]} with optional \emph{start}:\emph{end}:\emph{stride} is
+used here to get a ``section'' of the array as a group, the same as used in a
+Fortran array.
+
+We can also write,
+
+{\footnotesize
+\begin{verbatim}
+    #pragma omp parallel on g12
+    {
+      // On all the odd numbered processor
+      #pragma omp run on g12[1::2] 
+      {
+        ...
+      }
+    }
+\end{verbatim}
+}
+
+For C++ completeness, we should do the following at the end of the program,
+ 
+{\footnotesize
+\begin{verbatim}
+    delete[] gptr0; delete[] gptr1;
+\end{verbatim}
+}
+
+In Fortran and C, we do not have objects, we can only access an address of an
+object. Besides, we do not have the operator overloading, the corresponding
+concepts have to be implemented through functions\footnote{To make it clear,
+\texttt{OMP\_PROCS\_} is used as the prefix for all these type of functions.
+In addition, like \texttt{omp\_lock}, we may need \texttt{omp\_init\_procs} and
+\texttt{omp\_destroy\_procs}.}. Suppose we have a user defined function can get
+the address of \texttt{g12[:]} defined in the previous code.  And we want to
+start a new parallel region on all the odd numbered processors in Fortran,
+
+{\footnotesize
+\begin{verbatim}
+        USE OMP_LIB  ! or INCLUDE "omp_lib.h"
+        PARAMETER (N=10)
+        INTEGER (OMP_PROCS_KIND) :: GROUP, NEWGROUP
+        INTEGER (OMP_PROCS_KIND), DIMENSION(N) :: GROUPARRAY
+
+  !     User defined function, which calls a C routine.
+        INTEGER (OMP_PROCS_KIND) GET_THE_C_GROUP_HANDLE
+        EXTERNAL GET_THE_C_GROUP_HANDLE
+
+        CALL OMP_INIT_PROCS(GROUP)
+  !     Call the user defined function,
+  !     to get the group handle in the previous C code.
+        GROUP = GET_THE_C_GROUP_HANDLE()
+
+  !     In F77,  there is no allocatable array.
+        IF (OMP_PROCS_GET_NUM_MEMBERS(GROUP) .GT. N) STOP
+
+  !     Use DO loop if we don't like an extra function name
+        CALL OMP_INIT_PROCS_ARRAY(GROUPARRAY)
+  !     We know the group is g12, it is a flat 8 element array
+  !     Get the immediate members of the top level.
+        CALL OMP_PROCS_GET_MEMBERS(GROUP, GROUPARRAY)
+
+        CALL OMP_INIT_PROCS(NEWGROUP)
+  !     Lets use F90 array syntax,
+        CALL OMP_PROCS_SET_MEMBERS(NEWGROUP,GROUPARRAY(1::2))
+
+  !OMP$ PARALLEL ON NEWGROUP
+        ...
+
+  !OMP$ END PARALLEL
+
+        CALL OMP_DESTROY_PROCS(GROUP)
+        CALL OMP_DESTROY_PROCS_ARRAY(GROUPARRAY)
+        CALL OMP_DESTROY_PROCS(NEWGROUP)
+\end{verbatim}
+}
+
+We need to use explicit functions to group an array of processors as a simple
+handle and convert it back. (This is done through the \texttt{[]} operator in
+the previous C++ coding.) In fact, in C/C++ and Fortran, if we define the
+\texttt{on} clause working on both scalar and array type of \texttt{omp\_procs}
+variables, the previous snips can be further simplified, as some of the
+conversions are not needed.
+
+\subsection{Programming examples}
+
+We use a simple task to show a ``real'' program. Suppose we will calculate the
+sum of 100 numbers held in array \texttt{a[]} as a reduction. (This is not for
+performance, just to illustrate ideas.) And we assume that the machine is
+configured as two levels of hierarchy. 
+
+We can use the processor group denoted by the previous array \texttt{g12} to compute
+this with 8 threads,
+
+{\footnotesize
+\begin{verbatim}
+    #pragma omp parallel on g12
+    {
+      #pragma omp for reduction(+:s)
+      for (int i = 0; i < 100; i++) s+=a[i];
+    }
+\end{verbatim}
+}
+
+Alternatively, we can do
+
+{\footnotesize
+\begin{verbatim}
+    // get a flat processor array
+    #pragma omp parallel on (* processor.all())
+    {
+      #pragma omp for reduction(+:s)
+      for (int i = 0; i < 100; i++) s+=a[i];
+    }
+\end{verbatim}
+}
+
+Here \texttt{omp\_procs * omp\_procs::all(void) const} is a member function of
+the processor group, which returns an address of a processor group consist of
+all the lowest level processors available.
+
+The differences of the two snips is that the first one will use the same number
+of threads as the available processors in group \texttt{g12}, i.e., 8 threads;
+While the second segment only uses 6 threads, since we did not create new
+processors explicitly, the function will return all the 6 physical processors
+available.
+
+If we reconfigure the system, and let the two faster CPUs each offering two
+logical processors, as we specified that how to map local processors to physical
+processors is still an implementation defined issue, then the second writing of
+the program should have the same effects as the first one before the
+reconfiguration\footnote{So with the concept of the processor group, a well configured
+system hierarchy can hide all the machine details from regular users. The
+rather confusing \texttt{new} operator in the previous example should be
+regarded only as an advanced feature.}.
+
+Even though the processor group given by the system is hierarchical, all the
+previous examples are organizing processors as a flat array, now we will check
+ways to use nested levels explicitly. If a user want to take advantage of the
+architecture levels directly, (or organize a processor array as a hierarchy
+suitable to his nested parallel application) he may write the following code in Fortran,
+
+{\footnotesize
+\begin{verbatim}
+        INTEGER (OMP_PROCS_KIND) :: GROUP
+
+        ! Get the processor hierarchy
+        CALL OMP_INIT_PROCS(GROUP)
+        GROUP = OMP_GET_PROCS()
+
+  !OMP$ PARALLEL ON (GROUP) REDUCTION(+:S)
+        ID = OMP_GET_THREAD_NUM()
+        MYSTART = 1 + 25*ID  ! 25 should be calculated
+        MYEND = MYSTART + 25 - 1
+
+        !This is a real hardware, mapping rules are needed
+        IF ((ID .EQ. 1) .OR. (ID .EQ 3)) THEN
+          ! We are on the two faster single core CPUs
+  !OMP$   PARALLEL DO NUM_THREADS(2) REDUCTION(+:S)
+          DO I = MYSTART, MYEND
+            S = S + A(I)
+          ENDDO
+  !OMP$   END PARALLEL DO
+        ELSE
+          ! We are on the two processors with 2 CPU cores
+  !OMP$   PARALLEL DO REDUCTION(+:S)
+          DO I = MYSTART, MYEND
+            S = S + A(I)
+          ENDDO
+  !OMP$   END PARALLEL DO
+        ENDIF
+  !OMP$ END PARALLEL
+
+        CALL OMP_DESTROY_PROCS(GROUP)
+\end{verbatim}
+}
+
+%{\footnotesize
+%\begin{verbatim}
+%    // get the processor hierarchy
+%    // start parallel on the top level
+%    #pragma omp parallel reduction(+:s) on *omp_get_procs()
+%    {
+%      int id = omp_get_thread_num();
+%
+%      int myStart=0+25*id; // 25 should be calculated
+%      int myEnd=myStart+25;
+%
+%      // This is real hardware, mapping rules are needed
+%      if (id == 1 || id == 3) {
+%        // We are on the two faster single core CPUs,
+%        #pragma omp parallel for num_threads(2) reduction(+:s)
+%        // create 2 threads here on each processor.
+%        for (int i=myStart; i<myEnd; i++) s+=a[i];
+%      }
+%      else {
+%        // Here we are on two processors with 2 CPUs inside
+%        #pragma omp parallel for reduction(+:s)
+%        /* When another level of parallel region is encountered,
+%         * the members will start the parallel work.
+%         */
+%        for (int i=myStart; i<myEnd; i++) s+=a[i];
+%     }
+%   } 
+%\end{verbatim}
+%}
+
+%        /* When the first parallel region is encountered,
+%         * members of the top level will work in parallel.
+%         * Here, 4 threads will be created here, not 6,
+%         * as the machine is configured as a tree structure.
+%         */
+
+%As in the previous case, the code uses total number of eight threads to finish
+%the workshare, but it loses the portability the previous code enjoyed.
+
+If more member functions as query function are defined for the processor group,
+a user may get complete information from the handle. For example,
+communication routines can be customized directly by a user.
+
+{\footnotesize
+\begin{verbatim}
+    void my_function(omp_procs * g) {
+      // more query functions on *g
+      ...
+      #pragma omp parallel on *g
+      ...
+    }
+\end{verbatim}
+}
+
+%
+%If we allow user to override the internal functions of a processor group, he
+%may write his own barrier function.
+%
+%{\footnotesize
+%\begin{verbatim}
+%    void omp_procs::barrier() const {
+%      // this is the function to implement omp barrier directive 
+%      #pragma omp parallel on *this 
+%      {
+%        ...
+%      }
+%    }
+%\end{verbatim}
+%}
+%
+%% not sure if parregion should be passed as an argument of this function.
+%%Similarly, we may have, 
+%%
+%%\begin{verbatim}
+%%    void omp_procs::endpar() const {
+%%      // this is the function called when parallel region end
+%%      ...
+%%    }
+%%\end{verbatim}
+%
+%This will help user to modularize applications as library functions and implement
+%efficient synchronization functions on new architectures.

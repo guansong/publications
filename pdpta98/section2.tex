@@ -1,0 +1,71 @@
+\section{Programming examples}
+\label{examples}
+
+In this section we only give out example programs to show the new
+language features.
+
+The first example is Choleski decomposition,
+\begin{small}
+\begin{verbatim}
+Procs1 p = new Procs1(4);
+on(p) {
+  Range x = new CyclicRange(n, p.dim(0));
+  float a[[*,]] = new float [[n, x]];
+
+  float b[[*]] = new float [[n]];
+                      // buffer
+
+  ... some code to initialise `a' ...
+
+  for(int k = 0 ; k < N - 1 ; k++) {
+    at(l = x[k]) {
+      float d =  Math.sqrt(a[k,l]) ;
+      a[k,l] = d ;
+      for(int s = k + 1 ; s < N ; s++)
+        a[s,l] /= d ;
+    }
+
+    Adlib.remap(b[[k+1:]], a[[k+1:,  k]]);
+
+    overall(m = x | k + 1 : )
+      for(int i = x.idx(m) ; i < N ; i++)
+        a[i,m] -= b[i] * b[x.idx(m)] ;
+  }
+
+  at(l = x [N - 1])
+    a[N - 1,l] = Math.sqrt(a[N-1,l]) ;
+}
+\end{verbatim}
+\end{small}
+Here, \texttt{remap} is used to broadcast one updated column to each
+process.
+
+The second example is Jacobi iteration,
+\begin{small}
+\begin{verbatim}
+Procs2 p = new Procs2(2, 4);
+Range
+    x = new BlockRange(100, p.dim(0), 1),
+    y = new BlockRange(200, p.dim(1), 1); 
+on(p) {
+  float [[,]] a = new int [[x,y]] ;
+  ... some code to initialize `a'
+
+  float [[,]] b = new int [[x,y]];
+
+  Adlib.writeHalo(a);
+
+  overall(i=x|:)
+    overall(j=y|:)
+      b[i,j] = 0.25 * (a[i-1,j] + 
+          a[i+1,j] + a[i,j-1] + a[i,j+1]);
+  overall(i=x|:)
+    overall(j=y|:)
+      a[i,j] = b[i,j];
+}
+\end{verbatim}
+\end{small}
+In the above code, there is only one iteration, it is used to demonstrate
+how to define range reference with \emph{halo} area, and how to use
+the \texttt{writeHalo} function. 
+

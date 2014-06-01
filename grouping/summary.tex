@@ -1,0 +1,93 @@
+\section{Summary} 
+\label{summary}
+
+In this paper, we first gave out an simple mapping mechanism for binding
+threads to particular processors. We showed that even with this simple scheme
+we can improve performance numbers for real benchmark suites. 
+
+We further extended the concept of logical processors to a processor group,
+which addressed the OpenMP programming issues raised earlier. The concepts we
+presented here are still in draft. A lot of issues, including syntax
+definition, still need to be refined. 
+
+We can summarize the main features of the framework as following,
+
+\begin{itemize}
+
+\item \emph{Structured SPMD programming}: SPMD programming is the most common
+  techniques used in parallel programming, especially for data parallel
+  programming. As more processors are available in a real parallel system, and
+  more applications begin to looking for speed up exploiting parallel
+  processing, the traditional way of partition computation with data
+  distribution alone can not fulfill users' need. Specifically work
+  distribution or task distribution is needed among processors. 
+  %More likely several processors will work as a subgroup for a small scaled
+  %SPMD programming, and the result is combined with other similar partition to
+  %finish the whole computation.  
+  Instead of just using the processor ID number as a conditional guard to
+  distribute work, our programming model is based on a well designed structure
+  --- processor group. We call this programming style \emph{structured SPMD}
+  programming.
+
+\item \emph{Backward compatibility}: When we introduce the concept of the
+  processing group, we try to consider the backward compatibility. All the
+  previous OpenMP codes will still be legal with out any change. They are
+  running on the \emph{default} processor group provided by the system. 
+  %We do need to introduce the concept of a master group for the execution of
+  %the sequential part.
+
+\item \emph{Information encapsulation}: We hide most of the detailed
+  information of a physical machine by the logical processor group. We believe
+  this will help user to write portable code without too much machine specific
+  information. In fact, we think most of the time the flat array machine
+  configuration plus thread mapping are good enough for regular users to write
+  efficient code.
+
+\item \emph{System configurations}: Although we did not specify the details of
+  system configuration here, it is possible to develop a resource manager that
+  allows a physical system to be configured differently for different
+  applications or partially available to particular applications. It is also
+  possible to configure a system to have multiple groups with different
+  attributes, so an application may target to a heterogeneous architecture.
+  %Again, we think the flat array configuration will fit in for the request of
+  %most applications. Only for complicated machine architectures or
+  %applications users may want to use the hierarchies of the processor group.
+
+\item \emph{Integrated solution}: The proposal we presented here actually
+  addressed all the issues listed by the OpenMP language committee discussion
+  group as in section \ref{introduction}. Currently we are not sure whether
+  subgrouping threads will be merged in the future OpenMP programming, but we
+  believe that providing a parallel context for subroutines and library
+  functions with the concept of processor group is useful for the OpenMP
+  programming model.
+
+\item \emph{Incremental implementation}: There is no real runtime
+  implementation to support the proposal in this paper yet. Some of the earlier
+  work on distributed memory system can be traced through \cite{Zha98}. We
+  think the framework can be implemented with incremental steps. In the first
+  step, the main structure \texttt{omp\_procs} and its supporting functions
+  will be added as C++ library functions. Most of the concepts in the proposal
+  will be expressed as function calls. In the second step, we can improve the
+  language syntax, to bind the programming model to Fortran and C/C++. In the
+  third step, more compiler analysis will be used to improve the efficiency of
+  the code. We hope that most of the operation overhead inside the runtime
+  system can be optimized away or moved out of the hot spot with code motion.
+  As those functions should not have any side effects on user variables.
+
+\end{itemize}
+
+Parallel programming was never an easy task, and new machine architectures
+posed even more challenges in it. Unfortunately the extra concepts in the
+language we present here do not make any of this simpler. Yet they provide a
+set of tools for users to have more controls over the system.
+
+As we implemented the full features of the OpenMP 2.5 APIs, We are well aware
+of the possible overhead these extra concepts may bring to the standard. It is
+not the intention of this paper to discuss whether these kinds of complications
+are necessary. Rather we hope the paper can serve as a discussion base to see
+if this is the direction of the future OpenMP. It will be up to the users to
+decide which way OpenMP development should go.
+
+%Implementation consideration: 
+%performance
+%debug
