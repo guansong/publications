@@ -2,7 +2,7 @@
 all: translation.ps translation.pdf translation/translation.html
 
 translation.dvi : translation.tex translation.bib \
-                  accessError.eps section1.eps     section2.eps
+                  section1.eps     section2.eps
 	latex translation
 	bibtex translation
 	latex translation
